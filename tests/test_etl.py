@@ -45,6 +45,8 @@ def make_bars(symbols: list[str], start: date, end: date, base: float = 100.0) -
                     "close": px,
                     "volume": 1_000.0,
                     "factor": 1.0,
+                    "dividend": 0.0,
+                    "split_ratio": 0.0,
                 }
             )
     return pd.DataFrame(rows, columns=CANONICAL_COLUMNS)
@@ -76,9 +78,29 @@ def test_first_run_writes_parquet_per_symbol(tmp_path: Path) -> None:
     assert path.exists()
     stored = pd.read_parquet(path)
     assert "symbol" not in stored.columns  # symbol lives in the partition dir
-    assert list(stored.columns) == ["date", "open", "high", "low", "close", "volume", "factor"]
+    assert list(stored.columns) == [
+        "date", "open", "high", "low", "close", "volume", "factor", "dividend", "split_ratio",
+    ]
     assert len(stored) == 7
     assert stored["date"].is_monotonic_increasing
+
+
+def test_old_schema_parquet_upgraded_on_incremental_run(tmp_path: Path) -> None:
+    """Files written before the dividend/split_ratio columns still merge cleanly."""
+    settings = make_settings(tmp_path)
+    fetch = RecordingFetch()
+    run_etl(settings, symbols=["AAA"], fetch_fn=fetch, end=date(2024, 1, 10))
+
+    path = settings.data.parquet_dir / "symbol=AAA" / "data.parquet"
+    legacy = pd.read_parquet(path).drop(columns=["dividend", "split_ratio"])
+    legacy.to_parquet(path, index=False)  # simulate a pre-actions store
+
+    result = run_etl(settings, symbols=["AAA"], fetch_fn=fetch, end=date(2024, 1, 17))
+    assert result.symbols_failed == []
+    stored = pd.read_parquet(path)
+    assert len(stored) == 11
+    assert (stored["dividend"] == 0.0).all()
+    assert (stored["split_ratio"] == 0.0).all()
 
 
 def test_incremental_run_fetches_gap_plus_overlap(tmp_path: Path) -> None:
@@ -188,7 +210,7 @@ def test_parquet_dtypes_are_canonical(tmp_path: Path) -> None:
     run_etl(settings, symbols=["AAA"], fetch_fn=RecordingFetch(), end=date(2024, 1, 5))
     stored = pd.read_parquet(settings.data.parquet_dir / "symbol=AAA" / "data.parquet")
     assert stored["date"].dtype == np.dtype("datetime64[ns]")
-    for col in ("open", "high", "low", "close", "volume", "factor"):
+    for col in ("open", "high", "low", "close", "volume", "factor", "dividend", "split_ratio"):
         assert stored[col].dtype == np.float64
 
 

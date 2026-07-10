@@ -36,9 +36,11 @@ CANONICAL_COLUMNS: list[str] = [
     "close",
     "volume",
     "factor",
+    "dividend",
+    "split_ratio",
 ]
 
-_FLOAT_COLUMNS = ["open", "high", "low", "close", "volume", "factor"]
+_FLOAT_COLUMNS = ["open", "high", "low", "close", "volume", "factor", "dividend", "split_ratio"]
 
 
 def empty_bars() -> pd.DataFrame:
@@ -64,10 +66,19 @@ class QualityIssue:
 class MarketStore:
     """DuckDB-backed read access over the per-symbol parquet partitions."""
 
-    def __init__(self, cfg: DataConfig) -> None:
+    def __init__(self, cfg: DataConfig, *, in_memory: bool = False) -> None:
+        """in_memory=True keeps the DuckDB catalog in RAM (read paths only).
+
+        The parquet files are still the data source either way; in-memory mode
+        exists so long-lived readers (e.g. the web API) never hold the
+        single-writer lock on the .duckdb file that `finora etl` needs.
+        """
         self.cfg = cfg
-        cfg.duckdb_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: duckdb.DuckDBPyConnection | None = duckdb.connect(str(cfg.duckdb_path))
+        if in_memory:
+            self._conn: duckdb.DuckDBPyConnection | None = duckdb.connect(":memory:")
+        else:
+            cfg.duckdb_path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = duckdb.connect(str(cfg.duckdb_path))
         self._refresh_view()
 
     # -- lifecycle ---------------------------------------------------------
@@ -97,23 +108,38 @@ class MarketStore:
     def _refresh_view(self) -> None:
         """(Re)create the daily_bars view; falls back to an empty typed view
         when no parquet files exist yet, so queries never blow up on a fresh
-        checkout."""
+        checkout. Parquet written before the dividend/split_ratio columns
+        existed is still readable: union_by_name fills them with NULL (coalesced
+        to 0), and stores where *no* file has them get constant-0 columns."""
         if self._has_data():
             pattern = str(self.cfg.parquet_dir / "symbol=*" / "*.parquet").replace("'", "''")
-            self.conn.execute(
+            source = f"read_parquet('{pattern}', hive_partitioning=true, union_by_name=true)"
+            base = (
                 "CREATE OR REPLACE VIEW daily_bars AS "
                 "SELECT CAST(symbol AS VARCHAR) AS symbol, "
                 "CAST(date AS TIMESTAMP) AS date, "
-                "open, high, low, close, volume, factor "
-                f"FROM read_parquet('{pattern}', hive_partitioning=true)"
+                "open, high, low, close, volume, factor, "
+                "{actions} "
+                f"FROM {source}"
             )
+            try:
+                self.conn.execute(base.format(
+                    actions="COALESCE(dividend, 0.0) AS dividend, "
+                            "COALESCE(split_ratio, 0.0) AS split_ratio"
+                ))
+            except duckdb.BinderException:
+                # pre-actions store: no file carries the columns at all
+                self.conn.execute(base.format(
+                    actions="0.0 AS dividend, 0.0 AS split_ratio"
+                ))
         else:
             self.conn.execute(
                 "CREATE OR REPLACE VIEW daily_bars AS "
                 "SELECT CAST(NULL AS VARCHAR) AS symbol, CAST(NULL AS TIMESTAMP) AS date, "
                 "CAST(NULL AS DOUBLE) AS open, CAST(NULL AS DOUBLE) AS high, "
                 "CAST(NULL AS DOUBLE) AS low, CAST(NULL AS DOUBLE) AS close, "
-                "CAST(NULL AS DOUBLE) AS volume, CAST(NULL AS DOUBLE) AS factor "
+                "CAST(NULL AS DOUBLE) AS volume, CAST(NULL AS DOUBLE) AS factor, "
+                "CAST(NULL AS DOUBLE) AS dividend, CAST(NULL AS DOUBLE) AS split_ratio "
                 "WHERE false"
             )
 
@@ -142,7 +168,7 @@ class MarketStore:
             params.append(end)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         sql = (
-            "SELECT symbol, date, open, high, low, close, volume, factor "
+            "SELECT symbol, date, open, high, low, close, volume, factor, dividend, split_ratio "
             f"FROM daily_bars{where} ORDER BY symbol, date"
         )
         df = self.conn.execute(sql, params).fetchdf()

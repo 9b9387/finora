@@ -36,6 +36,8 @@ def bars(symbol: str, days: list[date], closes: list[float]) -> pd.DataFrame:
             "close": closes,
             "volume": [1_000.0 + i for i in range(len(days))],
             "factor": 1.0,
+            "dividend": 0.0,
+            "split_ratio": 0.0,
         }
     )[CANONICAL_COLUMNS]
 

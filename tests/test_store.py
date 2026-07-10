@@ -61,6 +61,8 @@ def make_bars_df(symbol: str, days: list[date], closes: list[float],
             "close": closes,
             "volume": volumes,
             "factor": 1.0,
+            "dividend": 0.0,
+            "split_ratio": 0.0,
         }
     )[CANONICAL_COLUMNS]
 
@@ -132,6 +134,47 @@ class TestMarketStore:
         with MarketStore(cfg):
             pass
         assert cfg.duckdb_path.exists()
+
+    def test_in_memory_store_reads_same_data_without_duckdb_file(
+        self, cfg: DataConfig
+    ) -> None:
+        write_partition(cfg.parquet_dir, "AAA", DAYS)
+        with MarketStore(cfg, in_memory=True) as store:
+            df = store.get_prices()
+        assert list(df.columns) == CANONICAL_COLUMNS
+        assert len(df) == 5
+        assert not cfg.duckdb_path.exists()  # no lock contention with ETL
+
+    def test_old_schema_partitions_get_zero_action_columns(self, cfg: DataConfig) -> None:
+        # write_partition writes the pre-actions 7-column layout on purpose
+        write_partition(cfg.parquet_dir, "AAA", DAYS)
+        with MarketStore(cfg) as store:
+            df = store.get_prices()
+        assert (df["dividend"] == 0.0).all()
+        assert (df["split_ratio"] == 0.0).all()
+
+    def test_mixed_schema_partitions_coalesce(self, cfg: DataConfig) -> None:
+        write_partition(cfg.parquet_dir, "OLD", DAYS)  # 7-column file
+        new = pd.DataFrame(
+            {
+                "date": pd.to_datetime(DAYS),
+                "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0,
+                "volume": 1_000.0, "factor": 1.0,
+                "dividend": [0.0, 0.25, 0.0, 0.0, 0.0],
+                "split_ratio": [0.0, 0.0, 4.0, 0.0, 0.0],
+            }
+        )
+        path = cfg.parquet_dir / "symbol=NEW" / "data.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        new.to_parquet(path, index=False)
+
+        with MarketStore(cfg) as store:
+            df = store.get_prices()
+        old_rows = df[df["symbol"] == "OLD"]
+        new_rows = df[df["symbol"] == "NEW"]
+        assert (old_rows["dividend"] == 0.0).all()
+        assert new_rows["dividend"].tolist() == [0.0, 0.25, 0.0, 0.0, 0.0]
+        assert new_rows["split_ratio"].tolist() == [0.0, 0.0, 4.0, 0.0, 0.0]
 
 
 class TestQualityChecks:

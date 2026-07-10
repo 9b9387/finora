@@ -3,6 +3,7 @@ and Qlib bin conversion."""
 from __future__ import annotations
 
 from finora.data.etl import EtlResult, FetchFn, fetch_daily_bars_openbb, run_etl
+from finora.data.events import AdjustmentEvent, detect_adjustment_events
 from finora.data.qlib_convert import convert_store, convert_to_qlib, read_day_bin
 from finora.data.store import (
     CANONICAL_COLUMNS,
@@ -19,9 +20,11 @@ from finora.data.universe import (
 )
 
 __all__ = [
+    "AdjustmentEvent",
     "CANONICAL_COLUMNS",
     "EtlResult",
     "FetchFn",
+    "detect_adjustment_events",
     "MarketStore",
     "QualityIssue",
     "convert_store",

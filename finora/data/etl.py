@@ -35,7 +35,10 @@ logger = get_logger(__name__)
 #: Fetches canonical daily bars for symbols in [start, end] inclusive.
 FetchFn = Callable[[list[str], date, date], pd.DataFrame]
 
-_BAR_COLUMNS = ["date", "open", "high", "low", "close", "volume", "factor"]
+_BAR_COLUMNS = [
+    "date", "open", "high", "low", "close", "volume", "factor", "dividend", "split_ratio",
+]
+_ACTION_COLUMNS = ("dividend", "split_ratio")
 
 
 @dataclass
@@ -73,7 +76,13 @@ def fetch_daily_bars_openbb(
 ) -> pd.DataFrame:
     """Fetch daily bars via OpenBB, one symbol at a time so a single bad
     ticker cannot sink the batch. Returns the canonical schema; symbols that
-    failed are simply absent from the result (warnings are logged)."""
+    failed are simply absent from the result (warnings are logged).
+
+    Two calls per symbol: split-adjusted bars (which carry the provider's
+    dividend/split_ratio event columns) plus a fully-adjusted close, so
+    factor = adjusted / close captures the dividend adjustment and
+    adj = close * factor holds with a meaningful factor.
+    """
     try:
         from openbb import obb
     except ImportError as exc:
@@ -84,14 +93,14 @@ def fetch_daily_bars_openbb(
     frames: list[pd.DataFrame] = []
     for symbol in symbols:
         try:
-            raw = _fetch_one_openbb(obb, symbol, start, end, provider)
+            raw, adjusted = _fetch_one_openbb(obb, symbol, start, end, provider)
         except Exception as exc:
             logger.warning("openbb fetch failed", symbol=symbol, error=str(exc))
             continue
         if raw is None or raw.empty:
             logger.warning("openbb returned no rows", symbol=symbol)
             continue
-        frames.append(_normalize_openbb_frame(raw, symbol))
+        frames.append(_normalize_openbb_frame(raw, symbol, adjusted=adjusted))
     if not frames:
         from finora.data.store import empty_bars
 
@@ -102,24 +111,70 @@ def fetch_daily_bars_openbb(
 
 def _fetch_one_openbb(
     obb: object, symbol: str, start: date, end: date, provider: str
-) -> pd.DataFrame | None:
+) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """(split-adjusted bars, fully-adjusted bars-or-None) for one symbol."""
     kwargs = dict(
         symbol=symbol,
         start_date=start.isoformat(),
         end_date=end.isoformat(),
         provider=provider,
     )
+    historical = obb.equity.price.historical  # type: ignore[attr-defined]
     try:
-        result = obb.equity.price.historical(  # type: ignore[attr-defined]
-            **kwargs, adjustment="splits_and_dividends"
-        )
+        base = historical(**kwargs, adjustment="splits_only").to_df()
     except Exception:
         # provider does not support the adjustment parameter
-        result = obb.equity.price.historical(**kwargs)  # type: ignore[attr-defined]
-    return result.to_df()
+        return historical(**kwargs).to_df(), None
+    try:
+        adjusted = historical(**kwargs, adjustment="splits_and_dividends").to_df()
+    except Exception as exc:
+        logger.warning(
+            "adjusted-close fetch failed; factor defaults to 1.0",
+            symbol=symbol, error=str(exc),
+        )
+        adjusted = None
+    return base, adjusted
 
 
-def _normalize_openbb_frame(raw: pd.DataFrame, symbol: str) -> pd.DataFrame:
+def _normalize_openbb_frame(
+    raw: pd.DataFrame, symbol: str, adjusted: pd.DataFrame | None = None
+) -> pd.DataFrame:
+    df = _clean_provider_frame(raw)
+    out = pd.DataFrame()
+    out["date"] = df["date"]
+    for col in ("open", "high", "low", "close", "volume"):
+        out[col] = pd.to_numeric(df[col], errors="coerce").astype(np.float64)
+
+    adj_close = None
+    inline = next((c for c in ("adj_close", "adjusted_close") if c in df.columns), None)
+    if inline is not None:
+        adj_close = pd.to_numeric(df[inline], errors="coerce").astype(np.float64)
+    elif adjusted is not None and not adjusted.empty:
+        adj_frame = _clean_provider_frame(adjusted)
+        aligned = out[["date"]].merge(adj_frame[["date", "close"]], on="date", how="left")
+        adj_close = pd.to_numeric(aligned["close"], errors="coerce").astype(np.float64)
+    if adj_close is not None:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            factor = adj_close.to_numpy() / out["close"].to_numpy()
+        out["factor"] = pd.Series(factor, index=out.index).replace(
+            [np.inf, -np.inf], np.nan
+        ).fillna(1.0)
+    else:
+        out["factor"] = 1.0
+
+    for col in _ACTION_COLUMNS:  # present in provider output only when events occur
+        if col in df.columns:
+            out[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(np.float64)
+        else:
+            out[col] = 0.0
+
+    out.insert(0, "symbol", symbol)
+    out = out.dropna(subset=["close"])
+    return out[CANONICAL_COLUMNS].sort_values("date").reset_index(drop=True)
+
+
+def _clean_provider_frame(raw: pd.DataFrame) -> pd.DataFrame:
+    """Lowercase columns, recover the date column, normalize timestamps."""
     df = raw.reset_index()
     df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
     if "date" not in df.columns:
@@ -127,21 +182,8 @@ def _normalize_openbb_frame(raw: pd.DataFrame, symbol: str) -> pd.DataFrame:
             if cand in df.columns:
                 df = df.rename(columns={cand: "date"})
                 break
-    out = pd.DataFrame()
-    out["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None).dt.normalize()
-    for col in ("open", "high", "low", "close", "volume"):
-        out[col] = pd.to_numeric(df[col], errors="coerce").astype(np.float64)
-    adj = next((c for c in ("adj_close", "adjusted_close") if c in df.columns), None)
-    if adj is not None:
-        adj_close = pd.to_numeric(df[adj], errors="coerce").astype(np.float64)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            factor = adj_close / out["close"]
-        out["factor"] = factor.replace([np.inf, -np.inf], np.nan).fillna(1.0)
-    else:
-        out["factor"] = 1.0
-    out.insert(0, "symbol", symbol)
-    out = out.dropna(subset=["close"])
-    return out[CANONICAL_COLUMNS].sort_values("date").reset_index(drop=True)
+    df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None).dt.normalize()
+    return df
 
 
 def run_etl(
@@ -303,12 +345,16 @@ def _symbol_path(parquet_dir: Path, symbol: str) -> Path:
 
 def _read_symbol_parquet(parquet_dir: Path, symbol: str) -> pd.DataFrame:
     """Per-symbol bars WITHOUT the symbol column (it lives in the partition
-    directory name, not inside the file)."""
+    directory name, not inside the file). Files written before the
+    dividend/split_ratio columns existed are upgraded with zeros on read."""
     path = _symbol_path(parquet_dir, symbol)
     if not path.exists():
         return _empty_symbol_bars()
     df = pd.read_parquet(path)
     df["date"] = pd.to_datetime(df["date"]).astype("datetime64[ns]")
+    for col in _ACTION_COLUMNS:
+        if col not in df.columns:
+            df[col] = 0.0
     return df[_BAR_COLUMNS]
 
 
@@ -322,10 +368,7 @@ def _empty_symbol_bars() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "date": pd.Series(dtype="datetime64[ns]"),
-            **{
-                c: pd.Series(dtype=np.float64)
-                for c in ("open", "high", "low", "close", "volume", "factor")
-            },
+            **{c: pd.Series(dtype=np.float64) for c in _BAR_COLUMNS if c != "date"},
         }
     )[_BAR_COLUMNS]
 
@@ -337,8 +380,9 @@ def _merge_bars(prior: pd.DataFrame, new_rows: pd.DataFrame) -> pd.DataFrame:
     merged = merged.drop_duplicates(subset="date", keep="last")
     merged = merged.sort_values("date").reset_index(drop=True)
     merged["date"] = pd.to_datetime(merged["date"]).astype("datetime64[ns]")
-    for col in ("open", "high", "low", "close", "volume", "factor"):
-        merged[col] = merged[col].astype(np.float64)
+    for col in _BAR_COLUMNS:
+        if col != "date":
+            merged[col] = merged[col].astype(np.float64)
     return merged
 
 
