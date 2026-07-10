@@ -4,13 +4,17 @@ from __future__ import annotations
 from finora.strategy.base import PriceLoader, Strategy, build_strategy
 from finora.strategy.momentum import MomentumStrategy
 from finora.strategy.qlib_strategy import QlibStrategy
+from finora.strategy.rsi import RsiMeanReversionStrategy, weights_from_rsi, wilder_rsi
 from finora.strategy.train import train_qlib_model
 
 __all__ = [
     "MomentumStrategy",
     "PriceLoader",
     "QlibStrategy",
+    "RsiMeanReversionStrategy",
     "Strategy",
     "build_strategy",
     "train_qlib_model",
+    "weights_from_rsi",
+    "wilder_rsi",
 ]

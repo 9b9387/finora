@@ -43,10 +43,13 @@ def run_backtest(
     price_loader / out_root exist for dependency injection (tests); production
     callers use the defaults.
     """
+    extra_snapshot: dict = {}
     if cfg.kind == "momentum":
         returns = _run_momentum(settings, cfg, start, end, cost_bps, price_loader)
     elif cfg.kind == "qlib":
         returns = _run_qlib(settings, cfg, start, end)
+    elif cfg.kind == "rsi":
+        returns, extra_snapshot = _run_rsi(settings, cfg, start, end, cost_bps, price_loader)
     else:
         raise ConfigError(f"unknown strategy kind {cfg.kind!r} for backtest of '{cfg.name}'")
 
@@ -58,6 +61,7 @@ def run_backtest(
         "cost_bps": cost_bps,
         "start": str(start) if start else None,
         "end": str(end) if end else None,
+        **extra_snapshot,
     }
     out_dir = save_backtest_artifact(cfg.name, metrics, snapshot, returns, out_root=out_root)
     log.info("backtest_done", strategy=cfg.name, out_dir=str(out_dir), **metrics)
@@ -134,6 +138,68 @@ def _run_momentum(
     return pd.Series(
         port_returns, index=pd.DatetimeIndex(port_dates, name="date"), name="return"
     )
+
+
+def _run_rsi(
+    settings: Settings,
+    cfg: StrategyConfig,
+    start: date | None,
+    end: date | None,
+    cost_bps: float,
+    price_loader: PriceLoader | None,
+) -> tuple[pd.Series, dict]:
+    """Replay the RSI re-arm state machine over the window and cost the trades.
+
+    RSI warms up on all history before the window, but the position starts
+    flat at the window start. Weight set on day d earns day d+1's adjusted
+    return; each weight change pays cost_bps on the traded fraction.
+    """
+    from finora.strategy.rsi import (
+        RsiMeanReversionStrategy,
+        adj_close_series,
+        weights_from_rsi,
+        wilder_rsi,
+    )
+
+    loader = price_loader or _build_price_loader(settings)
+    strat = RsiMeanReversionStrategy(cfg.name, cfg.params, loader)
+
+    bars = loader([strat.symbol], None, end)
+    if bars is None or bars.empty:
+        raise DataError(
+            f"no price data for {strat.symbol} to backtest '{cfg.name}'; run `finora etl` first"
+        )
+    if end is not None:
+        bars = bars[bars["date"] <= pd.Timestamp(end)]  # lookahead guard
+    adj = adj_close_series(bars, strat.symbol)
+    if adj.empty:
+        raise DataError(f"no usable {strat.symbol} closes for backtest of '{cfg.name}'")
+
+    end_ts = pd.Timestamp(end) if end is not None else adj.index[-1]
+    start_ts = (
+        pd.Timestamp(start) if start is not None else end_ts - pd.Timedelta(days=DEFAULT_WINDOW_DAYS)
+    )
+    rsi = wilder_rsi(adj, strat.period)
+    in_window = (rsi.index >= start_ts) & (rsi.index <= end_ts)
+    if int(in_window.sum()) < 2:
+        log.warning("backtest_window_too_short", strategy=cfg.name, n_dates=int(in_window.sum()))
+        return pd.Series(dtype=float, name="return"), {"symbol": strat.symbol, "trades": []}
+
+    weights, trades = weights_from_rsi(
+        rsi[in_window],
+        buy_below=strat.buy_below,
+        sell_above=strat.sell_above,
+        rearm=strat.rearm,
+        unit_fraction=strat.unit_fraction,
+        max_units=strat.max_units,
+    )
+    daily_returns = adj[in_window].pct_change(fill_method=None).fillna(0.0)
+    cost_rate = cost_bps / 1e4
+    turnover = weights.diff().abs().fillna(weights.abs())
+    strat_returns = (weights.shift(1) * daily_returns - turnover.shift(1) * cost_rate).iloc[1:]
+    strat_returns.name = "return"
+    strat_returns.index.name = "date"
+    return strat_returns, {"symbol": strat.symbol, "trades": trades}
 
 
 def _run_qlib(

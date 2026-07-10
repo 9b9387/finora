@@ -32,8 +32,9 @@ def _registry() -> dict[str, type]:
     # Imported lazily to avoid a base <-> implementation import cycle.
     from finora.strategy.momentum import MomentumStrategy
     from finora.strategy.qlib_strategy import QlibStrategy
+    from finora.strategy.rsi import RsiMeanReversionStrategy
 
-    return {"momentum": MomentumStrategy, "qlib": QlibStrategy}
+    return {"momentum": MomentumStrategy, "qlib": QlibStrategy, "rsi": RsiMeanReversionStrategy}
 
 
 def build_strategy(cfg: StrategyConfig, settings: Settings, price_loader: PriceLoader) -> Strategy:

@@ -8,6 +8,18 @@ strategies:
     params:
       lookback_days: 126     # ~6 months
       top_k: 20
+  - name: rsi_spy
+    kind: rsi
+    stage: paper
+    capital_fraction: 1.0
+    params:
+      symbol: SPY
+      period: 14            # daily Wilder RSI
+      buy_below: 30         # buy one unit on close below this
+      sell_above: 70        # sell one unit on close above this
+      rearm: 50             # trigger re-arms only after RSI returns here
+      unit_fraction: 0.25   # weight bought/sold per trigger
+      max_units: 4          # position cap (4 x 0.25 = fully invested)
   - name: qlib_lgb_alpha158
     kind: qlib
     stage: paper
