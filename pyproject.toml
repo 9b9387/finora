@@ -20,7 +20,10 @@ dependencies = [
 
 [project.optional-dependencies]
 openbb = ["openbb>=4.3"]
-qlib = ["pyqlib>=0.9.6"]
+# mlflow floor: pyqlib declares an unbounded mlflow dep, and the resolver
+# otherwise pairs newest pandas with mlflow 1.x, whose generated protobuf
+# code is incompatible with protobuf>=4 at runtime
+qlib = ["pyqlib>=0.9.6", "mlflow>=2.9"]
 futu = ["futu-api>=9.0"]
 backtesting = ["backtesting>=0.3.3"]
 
