@@ -1,8 +1,18 @@
 """Daily-bar ETL: OpenBB provider -> per-symbol Parquet partitions.
 
-Incremental by design: each run reads the newest stored date per symbol and
-fetches only the missing tail, then merges, dedups, and rewrites that
+Incremental by design: each run fetches from a few days before the newest
+stored date per symbol (the overlap), then merges, dedups, and rewrites that
 symbol's single parquet file (see finora.data.store for the on-disk layout).
+
+Two data-integrity guarantees:
+
+- No partial bars: when no explicit `end` is given, fetching is capped at the
+  last NYSE session that has already closed, so an intraday run never stores
+  an in-progress bar.
+- Adjustment self-healing: the overlap rows are compared against what is
+  stored; if close/factor diverge beyond `max_adjustment_drift`, the provider
+  has rescaled history (split/dividend re-adjustment) and the symbol's full
+  history is refetched and replaced instead of merged.
 """
 from __future__ import annotations
 
@@ -32,8 +42,30 @@ _BAR_COLUMNS = ["date", "open", "high", "low", "close", "volume", "factor"]
 class EtlResult:
     symbols_updated: list[str] = field(default_factory=list)
     symbols_failed: list[str] = field(default_factory=list)
+    symbols_rebuilt: list[str] = field(default_factory=list)
     rows_written: int = 0
     quality_issues: list[QualityIssue] = field(default_factory=list)
+
+
+def last_completed_session(now: pd.Timestamp | None = None) -> date:
+    """Most recent NYSE session whose close is already in the past — the
+    latest date for which a daily bar is final (handles half days via the
+    exchange calendar's actual close times)."""
+    import pandas_market_calendars as mcal
+
+    now = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+    if now.tzinfo is None:
+        now = now.tz_localize("UTC")
+    cal = mcal.get_calendar("XNYS")
+    for lookback_days in (10, 40):
+        schedule = cal.schedule(
+            start_date=(now - pd.Timedelta(days=lookback_days)).date(),
+            end_date=now.date(),
+        )
+        closed = schedule[schedule["market_close"] <= now]
+        if not closed.empty:
+            return pd.Timestamp(closed.index[-1]).date()
+    raise ConfigError("no completed NYSE session found in the last 40 days")
 
 
 def fetch_daily_bars_openbb(
@@ -117,8 +149,13 @@ def run_etl(
     symbols: list[str] | None = None,
     fetch_fn: FetchFn | None = None,
     end: date | None = None,
+    full_refresh: bool = False,
 ) -> EtlResult:
-    """Incrementally update the parquet store and run quality checks."""
+    """Incrementally update the parquet store and run quality checks.
+
+    full_refresh=True refetches every symbol's complete history and replaces
+    the stored files (re-applies the provider's current adjustment basis).
+    """
     if symbols is None:
         from finora.data.universe import load_universe
 
@@ -129,21 +166,29 @@ def run_etl(
         def fetch_fn(syms: list[str], s: date, e: date) -> pd.DataFrame:
             return fetch_daily_bars_openbb(syms, s, e, provider=provider)
 
-    end = end or date.today()
+    end = end or last_completed_session()
+    cfg = settings.data
     result = EtlResult()
     existing: dict[str, pd.DataFrame] = {}
     groups: dict[date, list[str]] = defaultdict(list)
+    replace_planned: set[str] = set()
 
     for symbol in symbols:
-        prior = _read_symbol_parquet(settings.data.parquet_dir, symbol)
+        prior = _read_symbol_parquet(cfg.parquet_dir, symbol)
         existing[symbol] = prior
-        if prior.empty:
-            start = settings.data.start_date
+        if full_refresh or prior.empty:
+            start = cfg.start_date
+            replace_planned.add(symbol)
         else:
-            start = (pd.Timestamp(prior["date"].max()) + timedelta(days=1)).date()
-        if start > end:
-            result.symbols_updated.append(symbol)  # already current
-            continue
+            newest = pd.Timestamp(prior["date"].max()).date()
+            if newest >= end:
+                result.symbols_updated.append(symbol)  # already current
+                continue
+            if cfg.refetch_overlap_days > 0:
+                overlap = prior["date"].tail(cfg.refetch_overlap_days)
+                start = pd.Timestamp(overlap.iloc[0]).date()
+            else:
+                start = newest + timedelta(days=1)
         groups[start].append(symbol)
 
     checked_frames: list[pd.DataFrame] = []
@@ -172,8 +217,27 @@ def run_etl(
                     result.symbols_updated.append(symbol)
                     checked_frames.append(_with_symbol(prior, symbol))
                 continue
-            merged = _merge_bars(prior, new_rows[_BAR_COLUMNS])
-            _write_symbol_parquet(settings.data.parquet_dir, symbol, merged)
+            new_rows = new_rows[_BAR_COLUMNS]
+            if symbol in replace_planned:
+                merged = _merge_bars(_empty_symbol_bars(), new_rows)
+                if not prior.empty:
+                    result.symbols_rebuilt.append(symbol)
+            else:
+                drift = _adjustment_drift(prior, new_rows)
+                if drift is not None and drift > cfg.max_adjustment_drift:
+                    logger.warning(
+                        "adjustment drift on overlap; rebuilding full history",
+                        symbol=symbol, drift=round(drift, 6),
+                        tolerance=cfg.max_adjustment_drift,
+                    )
+                    merged = _rebuild_history(fetch_fn, symbol, cfg.start_date, end)
+                    if merged is None:
+                        result.symbols_failed.append(symbol)  # prior data left intact
+                        continue
+                    result.symbols_rebuilt.append(symbol)
+                else:
+                    merged = _merge_bars(prior, new_rows)
+            _write_symbol_parquet(cfg.parquet_dir, symbol, merged)
             result.rows_written += max(len(merged) - len(prior), 0)
             result.symbols_updated.append(symbol)
             checked_frames.append(_with_symbol(merged, symbol))
@@ -186,10 +250,48 @@ def run_etl(
         "etl complete",
         updated=len(result.symbols_updated),
         failed=len(result.symbols_failed),
+        rebuilt=len(result.symbols_rebuilt),
         rows_written=result.rows_written,
         quality_issues=len(result.quality_issues),
     )
     return result
+
+
+def _adjustment_drift(prior: pd.DataFrame, new_rows: pd.DataFrame) -> float | None:
+    """Max relative close/factor divergence on dates present in both frames.
+
+    None when the frames share no dates (nothing to compare). Volume is
+    deliberately ignored: providers revise it routinely and benignly.
+    """
+    if prior.empty or new_rows.empty:
+        return None
+    old = prior.set_index(pd.DatetimeIndex(prior["date"]))[["close", "factor"]]
+    new = new_rows.set_index(pd.DatetimeIndex(new_rows["date"]))[["close", "factor"]]
+    common = old.index.intersection(new.index)
+    if common.empty:
+        return None
+    old, new = old.loc[common], new.loc[common]
+    denom = old.abs().clip(lower=1e-12)
+    return float(((old - new).abs() / denom).max().max())
+
+
+def _rebuild_history(
+    fetch_fn: FetchFn, symbol: str, start: date, end: date
+) -> pd.DataFrame | None:
+    """Refetch one symbol's complete history; None (keep prior data) on failure."""
+    try:
+        fetched = fetch_fn([symbol], start, end)
+    except Exception as exc:
+        logger.warning("history rebuild fetch failed", symbol=symbol, error=str(exc))
+        return None
+    if fetched.empty:
+        logger.warning("history rebuild returned no rows", symbol=symbol)
+        return None
+    rows = fetched[fetched["symbol"] == symbol]
+    if rows.empty:
+        logger.warning("history rebuild missing symbol in response", symbol=symbol)
+        return None
+    return _merge_bars(_empty_symbol_bars(), rows[_BAR_COLUMNS])
 
 
 # -- parquet helpers ---------------------------------------------------------

@@ -31,8 +31,10 @@ def make_bars(symbols: list[str], start: date, end: date, base: float = 100.0) -
     days = [d for d in JAN_2024_TRADING_DAYS if start <= d <= end]
     rows = []
     for symbol in symbols:
-        for i, d in enumerate(days):
-            px = base + i * 0.5
+        for d in days:
+            # Price is a function of the DATE, not the fetch window, so an
+            # overlap refetch reproduces identical values (no false drift).
+            px = base + JAN_2024_TRADING_DAYS.index(d) * 0.5
             rows.append(
                 {
                     "symbol": symbol,
@@ -79,7 +81,7 @@ def test_first_run_writes_parquet_per_symbol(tmp_path: Path) -> None:
     assert stored["date"].is_monotonic_increasing
 
 
-def test_incremental_run_fetches_only_the_gap(tmp_path: Path) -> None:
+def test_incremental_run_fetches_gap_plus_overlap(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     fetch = RecordingFetch()
     run_etl(settings, symbols=["AAA"], fetch_fn=fetch, end=date(2024, 1, 10))
@@ -87,9 +89,11 @@ def test_incremental_run_fetches_only_the_gap(tmp_path: Path) -> None:
 
     assert len(fetch.calls) == 2
     _, start2, end2 = fetch.calls[1]
-    assert start2 == date(2024, 1, 11)  # day after stored max
+    # Stored: Jan 2,3,4,5,8,9,10 -> 5-row overlap starts at Jan 4.
+    assert start2 == date(2024, 1, 4)
     assert end2 == date(2024, 1, 17)
-    assert result.rows_written == 4  # Jan 11, 12, 16, 17
+    assert result.rows_written == 4  # Jan 11, 12, 16, 17 (overlap rows replaced, not added)
+    assert result.symbols_rebuilt == []
 
     stored = pd.read_parquet(settings.data.parquet_dir / "symbol=AAA" / "data.parquet")
     assert len(stored) == 11
@@ -97,24 +101,24 @@ def test_incremental_run_fetches_only_the_gap(tmp_path: Path) -> None:
     assert stored["date"].is_monotonic_increasing
 
 
-def test_overlapping_refetch_dedups_keeping_newest(tmp_path: Path) -> None:
+def test_small_revision_within_tolerance_replaces_tail_quietly(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
-    run_etl(
-        settings,
-        symbols=["AAA"],
-        fetch_fn=RecordingFetch(base=100.0),
-        end=date(2024, 1, 10),
-    )
+    run_etl(settings, symbols=["AAA"], fetch_fn=RecordingFetch(), end=date(2024, 1, 10))
 
-    def overlapping_fetch(symbols: list[str], start: date, end: date) -> pd.DataFrame:
-        # Ignore the requested start: re-deliver Jan 10 with a revised close.
-        return make_bars(symbols, date(2024, 1, 10), end, base=200.0)
+    def revised_fetch(symbols: list[str], start: date, end: date) -> pd.DataFrame:
+        df = make_bars(symbols, start, end)
+        # Provider revises Jan 10's close by 0.05% — below the 0.1% tolerance.
+        mask = df["date"] == pd.Timestamp("2024-01-10")
+        df.loc[mask, "close"] = df.loc[mask, "close"] * 1.0005
+        return df
 
-    run_etl(settings, symbols=["AAA"], fetch_fn=overlapping_fetch, end=date(2024, 1, 12))
+    result = run_etl(settings, symbols=["AAA"], fetch_fn=revised_fetch, end=date(2024, 1, 12))
+    assert result.symbols_rebuilt == []  # not drift, just a tail revision
+
     stored = pd.read_parquet(settings.data.parquet_dir / "symbol=AAA" / "data.parquet")
     assert not stored["date"].duplicated().any()
     jan10 = stored.loc[stored["date"] == pd.Timestamp("2024-01-10"), "close"].iloc[0]
-    assert jan10 == 200.0  # newest row won the dedup
+    assert jan10 == pytest.approx(103.0 * 1.0005)  # refetched row won the dedup
 
 
 def test_up_to_date_symbol_skips_fetch(tmp_path: Path) -> None:
@@ -186,6 +190,101 @@ def test_parquet_dtypes_are_canonical(tmp_path: Path) -> None:
     assert stored["date"].dtype == np.dtype("datetime64[ns]")
     for col in ("open", "high", "low", "close", "volume", "factor"):
         assert stored[col].dtype == np.float64
+
+
+def test_adjustment_drift_triggers_history_rebuild(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    run_etl(settings, symbols=["AAA"], fetch_fn=RecordingFetch(), end=date(2024, 1, 10))
+
+    class SplitFetch(RecordingFetch):
+        """Provider rescaled history: every close now half (2:1 split)."""
+
+        def __call__(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
+            df = super().__call__(symbols, start, end)
+            for col in ("open", "high", "low", "close"):
+                df[col] = df[col] / 2.0
+            return df
+
+    split_fetch = SplitFetch()
+    result = run_etl(settings, symbols=["AAA"], fetch_fn=split_fetch, end=date(2024, 1, 17))
+
+    assert result.symbols_rebuilt == ["AAA"]
+    assert result.symbols_updated == ["AAA"]
+    # Overlap fetch first, then the full-history rebuild from start_date.
+    assert split_fetch.calls == [
+        (["AAA"], date(2024, 1, 4), date(2024, 1, 17)),
+        (["AAA"], date(2024, 1, 2), date(2024, 1, 17)),
+    ]
+    stored = pd.read_parquet(settings.data.parquet_dir / "symbol=AAA" / "data.parquet")
+    assert len(stored) == 11  # full history, on the new adjustment basis
+    jan2 = stored.loc[stored["date"] == pd.Timestamp("2024-01-02"), "close"].iloc[0]
+    assert jan2 == pytest.approx(50.0)  # old history rescaled, no discontinuity
+
+
+def test_rebuild_failure_keeps_prior_data(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    run_etl(settings, symbols=["AAA"], fetch_fn=RecordingFetch(), end=date(2024, 1, 10))
+    before = pd.read_parquet(settings.data.parquet_dir / "symbol=AAA" / "data.parquet")
+
+    calls: list[date] = []
+
+    def flaky_split_fetch(symbols: list[str], start: date, end: date) -> pd.DataFrame:
+        calls.append(start)
+        if len(calls) > 1:  # the rebuild fetch dies
+            raise RuntimeError("provider down")
+        df = make_bars(symbols, start, end)
+        df["close"] = df["close"] / 2.0  # drift on the overlap
+        return df
+
+    result = run_etl(settings, symbols=["AAA"], fetch_fn=flaky_split_fetch, end=date(2024, 1, 17))
+    assert result.symbols_failed == ["AAA"]
+    assert result.symbols_rebuilt == []
+
+    after = pd.read_parquet(settings.data.parquet_dir / "symbol=AAA" / "data.parquet")
+    pd.testing.assert_frame_equal(before, after)  # store untouched
+
+
+def test_full_refresh_replaces_history(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    run_etl(settings, symbols=["AAA"], fetch_fn=RecordingFetch(base=100.0), end=date(2024, 1, 10))
+
+    fetch = RecordingFetch(base=200.0)
+    result = run_etl(
+        settings, symbols=["AAA"], fetch_fn=fetch, end=date(2024, 1, 12), full_refresh=True
+    )
+    assert fetch.calls == [(["AAA"], date(2024, 1, 2), date(2024, 1, 12))]
+    assert result.symbols_rebuilt == ["AAA"]
+
+    stored = pd.read_parquet(settings.data.parquet_dir / "symbol=AAA" / "data.parquet")
+    assert len(stored) == 9
+    assert stored["close"].iloc[0] == pytest.approx(200.0)  # new basis everywhere
+
+
+def test_default_end_caps_at_last_completed_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import finora.data.etl as etl_module
+
+    settings = make_settings(tmp_path)
+    monkeypatch.setattr(etl_module, "last_completed_session", lambda: date(2024, 1, 10))
+    fetch = RecordingFetch()
+    run_etl(settings, symbols=["AAA"], fetch_fn=fetch)  # no explicit end
+    assert fetch.calls == [(["AAA"], date(2024, 1, 2), date(2024, 1, 10))]
+
+
+def test_last_completed_session_guards_partial_bars() -> None:
+    from finora.data.etl import last_completed_session
+
+    # Wed 2024-06-12, 15:00 ET (19:00 UTC): today's bar isn't final yet.
+    assert last_completed_session(pd.Timestamp("2024-06-12 19:00", tz="UTC")) == date(2024, 6, 11)
+    # Same day, 16:30 ET: session closed, today's bar is final.
+    assert last_completed_session(pd.Timestamp("2024-06-12 20:30", tz="UTC")) == date(2024, 6, 12)
+    # Saturday: Friday is the last completed session.
+    assert last_completed_session(pd.Timestamp("2024-06-15 12:00", tz="UTC")) == date(2024, 6, 14)
+    # Half day (Jul 3 closes 13:00 ET): 13:30 ET is already after the close.
+    assert last_completed_session(pd.Timestamp("2024-07-03 17:30", tz="UTC")) == date(2024, 7, 3)
+    # Naive timestamps are treated as UTC.
+    assert last_completed_session(pd.Timestamp("2024-06-12 19:00")) == date(2024, 6, 11)
 
 
 def test_openbb_missing_raises_configerror(monkeypatch: pytest.MonkeyPatch) -> None:

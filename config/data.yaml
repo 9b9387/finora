@@ -3,6 +3,8 @@
 provider: yfinance
 data_dir: data
 start_date: 2015-01-01
+refetch_overlap_days: 5      # stored tail rows re-fetched each run to detect revisions
+max_adjustment_drift: 0.001  # close/factor drift on overlap that triggers a full-history rebuild
 quality:
   max_missing_run_days: 5     # consecutive missing trading days before flagging
   max_abs_daily_return: 0.5   # |daily return| above this is flagged as suspect

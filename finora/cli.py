@@ -73,6 +73,10 @@ def universe(config: Path | None = _CONFIG_OPTION) -> None:
 def etl(
     config: Path | None = _CONFIG_OPTION,
     qlib: bool = typer.Option(False, "--qlib", help="Also convert the store to Qlib bin format."),
+    full: bool = typer.Option(
+        False, "--full",
+        help="Refetch complete history for every symbol (re-applies provider adjustments).",
+    ),
 ) -> None:
     """Incrementally fetch daily bars into the Parquet/DuckDB store."""
     from finora.data.etl import run_etl
@@ -80,11 +84,12 @@ def etl(
 
     settings = _load_settings(config)
     try:
-        result = run_etl(settings)
+        result = run_etl(settings, full_refresh=full)
     except FinoraError as exc:
         _fail(str(exc))
     typer.echo(
         f"etl: {result.rows_written} rows across {len(result.symbols_updated)} symbols"
+        + (f", {len(result.symbols_rebuilt)} histories rebuilt" if result.symbols_rebuilt else "")
         + (f", {len(result.symbols_failed)} failed" if result.symbols_failed else "")
     )
     for issue in result.quality_issues:

@@ -33,6 +33,12 @@ class DataConfig(StrictModel):
     provider: str = "yfinance"
     data_dir: Path = Path("data")
     start_date: date = date(2015, 1, 1)
+    # Incremental ETL re-fetches this many most-recent stored rows so revised
+    # values (dividend/split re-adjustments) are noticed; 0 disables overlap.
+    refetch_overlap_days: int = Field(default=5, ge=0)
+    # Relative close/factor divergence on overlap rows beyond which the
+    # symbol's full history is refetched (provider rescaled its history).
+    max_adjustment_drift: float = Field(default=1e-3, gt=0.0)
     quality: QualityConfig = QualityConfig()
 
     @property
