@@ -94,8 +94,8 @@ export function SymbolExplorer({ symbol, symbols }: Props) {
     fetcher,
   );
 
-  const bars = barsData?.bars ?? [];
-  const events = eventsData?.events ?? [];
+  const bars = useMemo(() => barsData?.bars ?? [], [barsData]);
+  const events = useMemo(() => eventsData?.events ?? [], [eventsData]);
   const eventCounts = useMemo(() => {
     const inWindow = events.filter(
       (e) =>
