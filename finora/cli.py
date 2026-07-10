@@ -6,6 +6,7 @@ real once the risk/execution stage is reviewed and merged.
 """
 from __future__ import annotations
 
+import os
 from datetime import date
 from pathlib import Path
 
@@ -189,6 +190,33 @@ def report(
     except FinoraError as exc:
         _fail(str(exc))
     typer.echo(f"research report -> {path}")
+
+
+@app.command()
+def serve(
+    config: Path | None = _CONFIG_OPTION,
+    host: str = typer.Option("127.0.0.1", help="Bind host."),
+    port: int = typer.Option(8000, help="Bind port."),
+    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes."),
+) -> None:
+    """Serve the local data API (the frontend lives in webapp/)."""
+    try:
+        import uvicorn
+
+        from finora.web.app import create_app
+    except ImportError:
+        _fail("web dependencies not installed: uv sync --extra web")
+    settings = _load_settings(config)  # fail fast on a bad config dir
+    typer.echo(f"data API on http://{host}:{port} (docs at /api/docs)")
+    if reload:
+        # reload mode re-imports by string; the config dir travels via env
+        if config is not None:
+            os.environ["FINORA_CONFIG"] = str(config)
+        uvicorn.run(
+            "finora.web.app:create_app", factory=True, host=host, port=port, reload=True
+        )
+    else:
+        uvicorn.run(create_app(settings), host=host, port=port)
 
 
 @app.command()

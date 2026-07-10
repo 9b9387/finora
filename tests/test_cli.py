@@ -34,7 +34,7 @@ def test_help_lists_all_commands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     for command in ("universe", "etl", "signals", "train", "backtest", "report",
-                    "trade", "health"):
+                    "serve", "trade", "health"):
         assert command in result.output
 
 
