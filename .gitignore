@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Secrets / local env
+.env
+*.local.yaml
+
+# Runtime data & state (large or machine-specific)
+data/
+logs/
+state/
+reports/
+mlruns/
+.qlib/
+
+# Model artifacts are large; backtest result JSON/CSV under artifacts/backtests IS tracked
+artifacts/models/
+
+# OS
+.DS_Store

@@ -1,0 +1,10 @@
+# L5 execution. kind: sim (in-process simulator) | futu (OpenD gateway).
+# Futu trd_env SIMULATE is paper trading; REAL is live money — switching to
+# REAL is a deliberate, reviewed config change.
+kind: sim
+futu:
+  host: 127.0.0.1
+  port: 11111
+  trd_env: SIMULATE
+  security_firm: FUTUSECURITIES
+  unlock_password_env: FUTU_UNLOCK_PWD

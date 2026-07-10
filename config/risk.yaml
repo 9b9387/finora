@@ -1,0 +1,16 @@
+# L4 risk gate. Every order passes these checks; a rejection names the rule.
+max_order_notional: 10000      # USD cap per single order
+max_position_pct: 0.05         # max fraction of equity in one name (post-trade)
+price_collar_pct: 0.05         # reject orders priced >5% away from reference quote
+max_orders_per_minute: 30      # runaway-strategy brake
+max_gross_exposure: 1.0        # no leverage
+quote_max_age_seconds: 900     # stale quotes block trading
+min_order_notional: 200        # dust threshold; smaller rebalance diffs are skipped
+reconcile_qty_tolerance: 0     # share counts must match the broker exactly
+reconcile_cash_tolerance: 5.0  # USD drift allowed (fees, interest)
+
+# Tiered daily-drawdown circuit breaker (fractions of start-of-day equity):
+circuit_breaker:
+  reduce_at: -0.03    # halve new position sizes
+  halt_new_at: -0.05  # block new orders entirely
+  flatten_at: -0.08   # liquidate everything and halt; manual reset required

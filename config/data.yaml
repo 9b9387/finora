@@ -1,0 +1,9 @@
+# L1 data layer. OpenBB provider for daily bars; all downstream layers read
+# from the local Parquet/DuckDB store, never from OpenBB directly.
+provider: yfinance
+data_dir: data
+start_date: 2015-01-01
+quality:
+  max_missing_run_days: 5     # consecutive missing trading days before flagging
+  max_abs_daily_return: 0.5   # |daily return| above this is flagged as suspect
+  min_price: 1.0              # prices below this are flagged (penny/bad data)

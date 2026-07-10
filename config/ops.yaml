@@ -1,0 +1,14 @@
+# L6 monitoring & operations.
+log_dir: logs
+state_dir: state
+reports_dir: reports
+notifier: stdout   # stdout | telegram | email; secrets come from env vars, never YAML
+telegram:
+  token_env: FINORA_TG_TOKEN
+  chat_id_env: FINORA_TG_CHAT
+email:
+  smtp_host: ""
+  smtp_port: 587
+  from_addr: ""
+  to_addr: ""
+  password_env: FINORA_SMTP_PWD

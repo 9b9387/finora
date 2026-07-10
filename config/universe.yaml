@@ -1,0 +1,4 @@
+# Trading universe. Empty symbols list = fetch current S&P 500 constituents
+# (snapshots are stored per-date to preserve point-in-time history).
+name: sp500
+symbols: []
