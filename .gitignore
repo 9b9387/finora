@@ -11,13 +11,14 @@ __pycache__/
 .env
 *.local.yaml
 
-# Runtime data & state (large or machine-specific)
-data/
-logs/
-state/
-reports/
-mlruns/
-.qlib/
+# Runtime data & state (large or machine-specific) — anchored to repo root
+# so source packages like finora/data are not caught
+/data/
+/logs/
+/state/
+/reports/
+/mlruns/
+/.qlib/
 
 # Model artifacts are large; backtest result JSON/CSV under artifacts/backtests IS tracked
 artifacts/models/
