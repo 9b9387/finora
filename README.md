@@ -53,6 +53,20 @@ importing execution or risk modules, and Finora never trades on its output. LLM 
 tools (e.g. TradingAgents) are used as separate, standalone projects — not integrated here,
 partly because LLM historical backtests are invalid (training data leaks the future).
 
+## Data webapp
+
+A local dashboard over the L1 store (coverage, candlestick charts with
+split/dividend markers, quality checks, universe snapshots):
+
+```bash
+uv sync --extra web
+uv run finora serve                    # terminal A: read-only API on :8000
+cd webapp && pnpm install && pnpm dev  # terminal B: UI on http://localhost:3000
+```
+
+The API opens the store in memory per request, so `finora etl` keeps working
+while it runs. Frontend config lives in `webapp/.env.local` (see `.env.example`).
+
 ## Development
 
 ```bash
