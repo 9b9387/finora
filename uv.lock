@@ -1110,9 +1110,14 @@ qlib = [
     { name = "mlflow" },
     { name = "pyqlib" },
 ]
+web = [
+    { name = "fastapi" },
+    { name = "uvicorn" },
+]
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -1121,6 +1126,7 @@ dev = [
 requires-dist = [
     { name = "backtesting", marker = "extra == 'backtesting'", specifier = ">=0.3.3" },
     { name = "duckdb", specifier = ">=1.0" },
+    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.115" },
     { name = "futu-api", marker = "extra == 'futu'", specifier = ">=9.0" },
     { name = "lxml", specifier = ">=5.0" },
     { name = "mlflow", marker = "extra == 'qlib'", specifier = ">=2.9" },
@@ -1135,11 +1141,13 @@ requires-dist = [
     { name = "requests", specifier = ">=2.31" },
     { name = "structlog", specifier = ">=24" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.30" },
 ]
-provides-extras = ["openbb", "qlib", "futu", "backtesting"]
+provides-extras = ["openbb", "qlib", "futu", "backtesting", "web"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.5" },
 ]
