@@ -1,0 +1,61 @@
+{
+  "name": "rsi_qqq",
+  "kind": "rsi",
+  "params": {
+    "symbol": "QQQ",
+    "period": 14,
+    "buy_below": 30,
+    "sell_above": 70,
+    "rearm": 50,
+    "unit_fraction": 0.25,
+    "max_units": 4
+  },
+  "cost_bps": 15.0,
+  "start": "2024-01-01",
+  "end": null,
+  "symbol": "QQQ",
+  "trades": [
+    {
+      "date": "2024-04-19T00:00:00",
+      "action": "buy",
+      "rsi": 29.78,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2024-05-28T00:00:00",
+      "action": "sell",
+      "rsi": 70.33,
+      "units_after": 0,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2025-03-10T00:00:00",
+      "action": "buy",
+      "rsi": 28.51,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2025-05-14T00:00:00",
+      "action": "sell",
+      "rsi": 70.76,
+      "units_after": 0,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2026-03-30T00:00:00",
+      "action": "buy",
+      "rsi": 28.86,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2026-04-15T00:00:00",
+      "action": "sell",
+      "rsi": 70.97,
+      "units_after": 0,
+      "weight_after": 0.0
+    }
+  ]
+}

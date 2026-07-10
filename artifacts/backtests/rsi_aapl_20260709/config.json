@@ -1,0 +1,89 @@
+{
+  "name": "rsi_aapl",
+  "kind": "rsi",
+  "params": {
+    "symbol": "AAPL",
+    "period": 14,
+    "buy_below": 30,
+    "sell_above": 70,
+    "rearm": 50,
+    "unit_fraction": 0.25,
+    "max_units": 4
+  },
+  "cost_bps": 15.0,
+  "start": "2024-01-01",
+  "end": null,
+  "symbol": "AAPL",
+  "trades": [
+    {
+      "date": "2024-01-04T00:00:00",
+      "action": "buy",
+      "rsi": 29.83,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2024-03-04T00:00:00",
+      "action": "buy",
+      "rsi": 28.83,
+      "units_after": 2,
+      "weight_after": 0.5
+    },
+    {
+      "date": "2024-05-15T00:00:00",
+      "action": "sell",
+      "rsi": 71.28,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2024-12-03T00:00:00",
+      "action": "sell",
+      "rsi": 73.03,
+      "units_after": 0,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2025-01-21T00:00:00",
+      "action": "buy",
+      "rsi": 29.7,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2025-03-13T00:00:00",
+      "action": "buy",
+      "rsi": 25.85,
+      "units_after": 2,
+      "weight_after": 0.5
+    },
+    {
+      "date": "2025-08-08T00:00:00",
+      "action": "sell",
+      "rsi": 73.66,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2025-09-22T00:00:00",
+      "action": "sell",
+      "rsi": 75.0,
+      "units_after": 0,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2026-01-06T00:00:00",
+      "action": "buy",
+      "rsi": 29.94,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2026-05-08T00:00:00",
+      "action": "sell",
+      "rsi": 72.94,
+      "units_after": 0,
+      "weight_after": 0.0
+    }
+  ]
+}

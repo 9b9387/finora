@@ -1,0 +1,75 @@
+{
+  "name": "rsi_tsla",
+  "kind": "rsi",
+  "params": {
+    "symbol": "TSLA",
+    "period": 14,
+    "buy_below": 30,
+    "sell_above": 70,
+    "rearm": 50,
+    "unit_fraction": 0.25,
+    "max_units": 4
+  },
+  "cost_bps": 15.0,
+  "start": "2024-01-01",
+  "end": null,
+  "symbol": "TSLA",
+  "trades": [
+    {
+      "date": "2024-01-18T00:00:00",
+      "action": "buy",
+      "rsi": 28.79,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2024-03-14T00:00:00",
+      "action": "buy",
+      "rsi": 27.69,
+      "units_after": 2,
+      "weight_after": 0.5
+    },
+    {
+      "date": "2024-04-22T00:00:00",
+      "action": "buy",
+      "rsi": 27.84,
+      "units_after": 3,
+      "weight_after": 0.75
+    },
+    {
+      "date": "2024-07-01T00:00:00",
+      "action": "sell",
+      "rsi": 73.13,
+      "units_after": 2,
+      "weight_after": 0.5
+    },
+    {
+      "date": "2024-11-07T00:00:00",
+      "action": "sell",
+      "rsi": 71.26,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2025-02-25T00:00:00",
+      "action": "buy",
+      "rsi": 28.87,
+      "units_after": 2,
+      "weight_after": 0.5
+    },
+    {
+      "date": "2025-05-13T00:00:00",
+      "action": "sell",
+      "rsi": 70.05,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2025-09-12T00:00:00",
+      "action": "sell",
+      "rsi": 74.84,
+      "units_after": 0,
+      "weight_after": 0.0
+    }
+  ]
+}

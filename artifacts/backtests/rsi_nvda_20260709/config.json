@@ -1,0 +1,33 @@
+{
+  "name": "rsi_nvda",
+  "kind": "rsi",
+  "params": {
+    "symbol": "NVDA",
+    "period": 14,
+    "buy_below": 30,
+    "sell_above": 70,
+    "rearm": 50,
+    "unit_fraction": 0.25,
+    "max_units": 4
+  },
+  "cost_bps": 15.0,
+  "start": "2024-01-01",
+  "end": null,
+  "symbol": "NVDA",
+  "trades": [
+    {
+      "date": "2025-04-04T00:00:00",
+      "action": "buy",
+      "rsi": 28.46,
+      "units_after": 1,
+      "weight_after": 0.25
+    },
+    {
+      "date": "2025-05-14T00:00:00",
+      "action": "sell",
+      "rsi": 73.39,
+      "units_after": 0,
+      "weight_after": 0.0
+    }
+  ]
+}
