@@ -10,7 +10,7 @@ Six layers; every order must pass the risk gate — no strategy can bypass it.
 |-------|--------|------|
 | L1 Data | `finora/data/` | OpenBB ETL → Parquet/DuckDB store → Qlib bin format. Live quotes come from the broker feed, never OpenBB. |
 | L2 Strategy | `finora/strategy/` | Qlib models emit `Signal` objects (the core interface). |
-| — Research | `finora/research/` | TradingAgents produces offline research reports only — no import path into execution. |
+| — Research | `finora/research/` | Offline data-driven research reports only — no import path into execution. |
 | L3 Validation | `finora/backtest/` | Qlib backtester for portfolio strategies; walk-forward splits, cost-aware metrics. |
 | L4 Risk | `finora/risk/` | Independent pre-trade gate, tiered circuit breaker, reconciliation, kill switch, strategy quarantine. |
 | L5 Execution | `finora/execution/` | Broker abstraction (Futu OpenAPI / sim), OMS state machine, rebalance order diffing. |
@@ -45,13 +45,13 @@ Futu/Moomoo OpenAPI via a locally running [OpenD gateway](https://openapi.futunn
 `config/broker.yaml` defaults to `kind: sim` (in-process simulator) and Futu `trd_env: SIMULATE`
 (paper). Switching to live is a deliberate config change, never a default.
 
-## TradingAgents
+## Research reports
 
-LLM strategies cannot be historically backtested (the model's training data leaks the
-future), so [TradingAgents](https://github.com/TauricResearch/TradingAgents) is wired as a
-research assistant only: `finora report TICKER` writes a markdown report under `reports/`.
-Install it manually if wanted; `finora/research/` degrades to a data-driven template
-without it and is forbidden (by test) from importing execution or risk modules.
+`finora report TICKER` writes a data-driven markdown report (performance metrics plus an
+analyst-notes template) under `reports/`. `finora/research/` is forbidden (by test) from
+importing execution or risk modules, and Finora never trades on its output. LLM research
+tools (e.g. TradingAgents) are used as separate, standalone projects — not integrated here,
+partly because LLM historical backtests are invalid (training data leaks the future).
 
 ## Development
 
