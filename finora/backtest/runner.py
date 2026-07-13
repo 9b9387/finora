@@ -48,8 +48,10 @@ def run_backtest(
         returns = _run_momentum(settings, cfg, start, end, cost_bps, price_loader)
     elif cfg.kind == "qlib":
         returns = _run_qlib(settings, cfg, start, end)
-    elif cfg.kind == "rsi":
-        returns, extra_snapshot = _run_rsi(settings, cfg, start, end, cost_bps, price_loader)
+    elif cfg.kind in TECHNICAL_KINDS:
+        returns, extra_snapshot = _run_technical(
+            settings, cfg, start, end, cost_bps, price_loader
+        )
     else:
         raise ConfigError(f"unknown strategy kind {cfg.kind!r} for backtest of '{cfg.name}'")
 
@@ -140,7 +142,10 @@ def _run_momentum(
     )
 
 
-def _run_rsi(
+TECHNICAL_KINDS = ("rsi", "ma_cross", "bollinger")
+
+
+def _run_technical(
     settings: Settings,
     cfg: StrategyConfig,
     start: date | None,
@@ -148,21 +153,17 @@ def _run_rsi(
     cost_bps: float,
     price_loader: PriceLoader | None,
 ) -> tuple[pd.Series, dict]:
-    """Replay the RSI re-arm state machine over the window and cost the trades.
+    """Replay a single-instrument technical rule over the window.
 
-    RSI warms up on all history before the window, but the position starts
-    flat at the window start. Weight set on day d earns day d+1's adjusted
-    return; each weight change pays cost_bps on the traded fraction.
+    Indicators warm up on all history before the window; path-dependent rules
+    start flat at the window start. Weight set on day d earns day d+1's
+    adjusted return; each weight change pays cost_bps on the traded fraction.
     """
-    from finora.strategy.rsi import (
-        RsiMeanReversionStrategy,
-        adj_close_series,
-        weights_from_rsi,
-        wilder_rsi,
-    )
+    from finora.strategy.base import build_strategy
+    from finora.strategy.technical import adj_close_series
 
     loader = price_loader or _build_price_loader(settings)
-    strat = RsiMeanReversionStrategy(cfg.name, cfg.params, loader)
+    strat = build_strategy(cfg, settings, loader)
 
     bars = loader([strat.symbol], None, end)
     if bars is None or bars.empty:
@@ -179,20 +180,12 @@ def _run_rsi(
     start_ts = (
         pd.Timestamp(start) if start is not None else end_ts - pd.Timedelta(days=DEFAULT_WINDOW_DAYS)
     )
-    rsi = wilder_rsi(adj, strat.period)
-    in_window = (rsi.index >= start_ts) & (rsi.index <= end_ts)
+    in_window = pd.Series((adj.index >= start_ts) & (adj.index <= end_ts), index=adj.index)
     if int(in_window.sum()) < 2:
         log.warning("backtest_window_too_short", strategy=cfg.name, n_dates=int(in_window.sum()))
         return pd.Series(dtype=float, name="return"), {"symbol": strat.symbol, "trades": []}
 
-    weights, trades = weights_from_rsi(
-        rsi[in_window],
-        buy_below=strat.buy_below,
-        sell_above=strat.sell_above,
-        rearm=strat.rearm,
-        unit_fraction=strat.unit_fraction,
-        max_units=strat.max_units,
-    )
+    weights, trades = strat.window_weights(adj, in_window)
     daily_returns = adj[in_window].pct_change(fill_method=None).fillna(0.0)
     cost_rate = cost_bps / 1e4
     turnover = weights.diff().abs().fillna(weights.abs())

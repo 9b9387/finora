@@ -30,11 +30,19 @@ class Strategy(Protocol):
 
 def _registry() -> dict[str, type]:
     # Imported lazily to avoid a base <-> implementation import cycle.
+    from finora.strategy.bollinger import BollingerBreakoutStrategy
+    from finora.strategy.ma_cross import MaCrossStrategy
     from finora.strategy.momentum import MomentumStrategy
     from finora.strategy.qlib_strategy import QlibStrategy
     from finora.strategy.rsi import RsiMeanReversionStrategy
 
-    return {"momentum": MomentumStrategy, "qlib": QlibStrategy, "rsi": RsiMeanReversionStrategy}
+    return {
+        "momentum": MomentumStrategy,
+        "qlib": QlibStrategy,
+        "rsi": RsiMeanReversionStrategy,
+        "ma_cross": MaCrossStrategy,
+        "bollinger": BollingerBreakoutStrategy,
+    }
 
 
 def build_strategy(cfg: StrategyConfig, settings: Settings, price_loader: PriceLoader) -> Strategy:
@@ -47,6 +55,7 @@ def build_strategy(cfg: StrategyConfig, settings: Settings, price_loader: PriceL
             f"unknown strategy kind {kind!r} for strategy '{cfg.name}'; "
             f"expected one of {sorted(registry)}"
         )
-    if kind == "momentum":
-        return cls(name=cfg.name, params=cfg.params, price_loader=price_loader)
-    return cls(name=cfg.name, params=cfg.params, settings=settings)
+    if kind == "qlib":
+        return cls(name=cfg.name, params=cfg.params, settings=settings)
+    # momentum and all single-instrument technical strategies read prices only
+    return cls(name=cfg.name, params=cfg.params, price_loader=price_loader)

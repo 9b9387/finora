@@ -27,6 +27,8 @@ const KIND_STYLES: Record<string, string> = {
   qlib: "bg-violet-500/15 text-violet-700 dark:text-violet-400",
   momentum: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
   rsi: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  ma_cross: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  bollinger: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
 };
 
 export default function BacktestsPage() {

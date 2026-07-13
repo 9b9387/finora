@@ -20,6 +20,24 @@ strategies:
       rearm: 50             # trigger re-arms only after RSI returns here
       unit_fraction: 0.25   # weight bought/sold per trigger
       max_units: 4          # position cap (4 x 0.25 = fully invested)
+  - name: ma_cross_spy
+    kind: ma_cross
+    stage: paper
+    capital_fraction: 1.0
+    params:
+      symbol: SPY
+      fast_days: 50           # long while 50-day SMA > 200-day SMA (golden cross)
+      slow_days: 200
+      weight: 1.0             # fraction of equity held during a golden-cross regime
+  - name: boll_spy
+    kind: bollinger
+    stage: paper
+    capital_fraction: 1.0
+    params:
+      symbol: SPY
+      period: 20              # middle band = 20-day SMA
+      num_std: 2.0            # upper band = middle + 2 sigma
+      weight: 1.0             # buy close above upper band; exit close below middle
   - name: qlib_lgb_alpha158
     kind: qlib
     stage: paper

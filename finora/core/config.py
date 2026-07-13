@@ -120,7 +120,7 @@ SMALL_STAGE_FRACTION = 0.05
 
 class StrategyConfig(StrictModel):
     name: str
-    kind: Literal["qlib", "momentum", "rsi"] = "momentum"
+    kind: Literal["qlib", "momentum", "rsi", "ma_cross", "bollinger"] = "momentum"
     stage: StrategyStage = StrategyStage.PAPER
     capital_fraction: float = Field(default=1.0, gt=0.0, le=1.0)
     params: dict = Field(default_factory=dict)
