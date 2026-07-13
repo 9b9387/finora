@@ -258,8 +258,11 @@ def _run_qlib(
         )
 
     strategy = TopkDropoutStrategy(topk=top_k, n_drop=n_drop, signal=predictions)
+    # qlib defaults the benchmark to CSI300 (SH000300); point it at a symbol
+    # that exists in the local US store instead.
+    benchmark = str(params.get("benchmark", "SPY"))
     report, _positions = backtest_daily(
-        start_time=seg_start, end_time=seg_end, strategy=strategy
+        start_time=seg_start, end_time=seg_end, strategy=strategy, benchmark=benchmark
     )
     returns = report["return"].astype(float)
     if "cost" in report.columns:

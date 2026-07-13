@@ -7,6 +7,7 @@ dataset_config.json, meta.json). qlib itself is imported lazily so
 from __future__ import annotations
 
 import json
+import os
 import pickle
 from datetime import date
 from pathlib import Path
@@ -35,6 +36,9 @@ def ensure_qlib_init(settings: Settings) -> None:
     global _qlib_initialized
     if _qlib_initialized:
         return
+    # qlib's recorder tracks runs in ./mlruns via mlflow's file store, which
+    # mlflow >= 3.14 rejects unless explicitly allowed.
+    os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
     try:
         import qlib
 
