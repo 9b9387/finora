@@ -2,11 +2,14 @@
 
 import { CalendarIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import useSWR from "swr";
 
-import { CandlestickChart } from "@/components/candlestick-chart";
+import {
+  CandlestickChart,
+  type VisibleRange,
+} from "@/components/candlestick-chart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -72,23 +75,12 @@ export function SymbolExplorer({ symbol, symbols }: Props) {
   const [adjusted, setAdjusted] = useState(true);
   const [showDividends, setShowDividends] = useState(true);
 
-  const window = useMemo(() => {
-    if (preset === "CUSTOM" && customRange?.from) {
-      return {
-        start: toIso(customRange.from),
-        end: customRange.to ? toIso(customRange.to) : undefined,
-      };
-    }
-    const days = PRESETS.find((p) => p.key === preset)?.days ?? null;
-    return { start: days ? isoDaysAgo(days) : undefined, end: undefined };
-  }, [preset, customRange]);
-
-  const barsQuery = new URLSearchParams();
-  if (window.start) barsQuery.set("start", window.start);
-  if (window.end) barsQuery.set("end", window.end);
-  const barsKey = `/api/symbols/${symbol}/bars${barsQuery.size ? `?${barsQuery}` : ""}`;
-
-  const { data: barsData, error: barsError } = useSWR<BarsResponse>(barsKey, fetcher);
+  // Full history is always loaded; presets only move the chart's view, so
+  // panning left reaches the entire stored series.
+  const { data: barsData, error: barsError } = useSWR<BarsResponse>(
+    `/api/symbols/${symbol}/bars`,
+    fetcher,
+  );
   const { data: eventsData } = useSWR<EventsResponse>(
     `/api/symbols/${symbol}/events`,
     fetcher,
@@ -96,18 +88,49 @@ export function SymbolExplorer({ symbol, symbols }: Props) {
 
   const bars = useMemo(() => barsData?.bars ?? [], [barsData]);
   const events = useMemo(() => eventsData?.events ?? [], [eventsData]);
+  const lastDate = bars.length > 0 ? bars[bars.length - 1].date : null;
+
+  const visibleRange = useMemo<VisibleRange | null>(() => {
+    if (!lastDate) return null;
+    if (preset === "CUSTOM" && customRange?.from) {
+      return {
+        from: toIso(customRange.from),
+        to: customRange.to ? toIso(customRange.to) : lastDate,
+      };
+    }
+    const days = PRESETS.find((p) => p.key === preset)?.days ?? null;
+    return days ? { from: isoDaysAgo(days, new Date(lastDate)), to: lastDate } : null;
+  }, [preset, customRange, lastDate]);
+
+  // What the user actually sees after panning/zooming (debounced).
+  const [view, setView] = useState<VisibleRange | null>(null);
+  const viewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleViewChange = useCallback((from: string, to: string) => {
+    if (viewTimer.current) clearTimeout(viewTimer.current);
+    viewTimer.current = setTimeout(() => setView({ from, to }), 150);
+  }, []);
+  useEffect(
+    () => () => {
+      if (viewTimer.current) clearTimeout(viewTimer.current);
+    },
+    [],
+  );
+
+  const visibleBars = useMemo(() => {
+    if (!view) return bars;
+    return bars.filter((bar) => bar.date >= view.from && bar.date <= view.to);
+  }, [bars, view]);
+
   const eventCounts = useMemo(() => {
-    const inWindow = events.filter(
-      (e) =>
-        bars.length > 0 &&
-        e.date >= bars[0].date &&
-        e.date <= bars[bars.length - 1].date,
-    );
+    if (visibleBars.length === 0) return { splits: 0, dividends: 0 };
+    const first = visibleBars[0].date;
+    const last = visibleBars[visibleBars.length - 1].date;
+    const inView = events.filter((e) => e.date >= first && e.date <= last);
     return {
-      splits: inWindow.filter((e) => e.kind === "split").length,
-      dividends: inWindow.filter((e) => e.kind === "dividend").length,
+      splits: inView.filter((e) => e.kind === "split").length,
+      dividends: inView.filter((e) => e.kind === "dividend").length,
     };
-  }, [events, bars]);
+  }, [events, visibleBars]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -192,7 +215,7 @@ export function SymbolExplorer({ symbol, symbols }: Props) {
             <Skeleton className="h-[420px] w-full" />
           ) : bars.length === 0 ? (
             <p className="py-24 text-center text-sm text-muted-foreground">
-              No bars in this window.
+              No bars stored for this symbol.
             </p>
           ) : (
             <CandlestickChart
@@ -200,15 +223,18 @@ export function SymbolExplorer({ symbol, symbols }: Props) {
               events={events}
               adjusted={adjusted}
               showDividends={showDividends}
+              visibleRange={visibleRange}
+              onVisibleRangeChange={handleViewChange}
             />
           )}
           <p className="mt-2 px-1 text-xs text-muted-foreground">
             {barsData
-              ? `${formatCount(barsData.count)} bars` +
-                (bars.length > 0
-                  ? ` · ${bars[0].date} → ${bars[bars.length - 1].date}`
+              ? `viewing ${formatCount(visibleBars.length)} of ${formatCount(bars.length)} bars` +
+                (visibleBars.length > 0
+                  ? ` · ${visibleBars[0].date} → ${visibleBars[visibleBars.length - 1].date}`
                   : "") +
-                ` · ${eventCounts.splits} splits, ${eventCounts.dividends} dividends in window`
+                ` · ${eventCounts.splits} splits, ${eventCounts.dividends} dividends in view` +
+                " · drag or zoom to browse the full history"
               : "loading…"}
             {" · "}
             {adjusted
@@ -220,11 +246,11 @@ export function SymbolExplorer({ symbol, symbols }: Props) {
 
       <Card className="py-0">
         <CardHeader className="pt-4">
-          <CardTitle className="text-base">Bars</CardTitle>
+          <CardTitle className="text-base">Bars in view</CardTitle>
           <CardDescription>
-            {bars.length > TABLE_LIMIT
-              ? `latest ${TABLE_LIMIT} of ${formatCount(bars.length)} in window`
-              : `${bars.length} rows`}
+            {visibleBars.length > TABLE_LIMIT
+              ? `latest ${TABLE_LIMIT} of ${formatCount(visibleBars.length)} in view`
+              : `${visibleBars.length} rows`}
           </CardDescription>
         </CardHeader>
         <div className="overflow-x-auto">
@@ -242,7 +268,7 @@ export function SymbolExplorer({ symbol, symbols }: Props) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {bars
+              {visibleBars
                 .slice(-TABLE_LIMIT)
                 .reverse()
                 .map((bar) => (

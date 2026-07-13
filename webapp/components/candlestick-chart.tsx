@@ -16,11 +16,21 @@ import { useEffect, useMemo, useRef } from "react";
 
 import type { AdjustmentEvent, Bar } from "@/lib/types";
 
+export interface VisibleRange {
+  from: string;
+  to: string;
+}
+
 interface Props {
   bars: Bar[];
   events: AdjustmentEvent[];
   adjusted: boolean;
   showDividends: boolean;
+  /** Window to show initially / on preset change; null fits all data. The
+   *  user can always pan and zoom beyond it — the full history is loaded. */
+  visibleRange: VisibleRange | null;
+  /** Fires (debounced by the caller) as the user pans or zooms. */
+  onVisibleRangeChange?: (from: string, to: string) => void;
   height?: number;
 }
 
@@ -53,11 +63,22 @@ function toTime(date: string): Time {
   return date as Time; // 'YYYY-MM-DD' business day strings are valid Time values
 }
 
+function timeToIso(value: Time): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") {
+    return new Date(value * 1000).toISOString().slice(0, 10);
+  }
+  const { year, month, day } = value;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 export function CandlestickChart({
   bars,
   events,
   adjusted,
   showDividends,
+  visibleRange,
+  onVisibleRangeChange,
   height = 420,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -65,6 +86,11 @@ export function CandlestickChart({
   const priceRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  // latest callback without re-creating the chart subscription
+  const rangeCallbackRef = useRef(onVisibleRangeChange);
+  useEffect(() => {
+    rangeCallbackRef.current = onVisibleRangeChange;
+  }, [onVisibleRangeChange]);
 
   const { resolvedTheme } = useTheme();
   const palette = PALETTES[resolvedTheme === "dark" ? "dark" : "light"];
@@ -148,6 +174,11 @@ export function CandlestickChart({
     priceRef.current = price;
     volumeRef.current = volume;
     markersRef.current = createSeriesMarkers(price, []);
+    chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+      if (range) {
+        rangeCallbackRef.current?.(timeToIso(range.from), timeToIso(range.to));
+      }
+    });
     return () => {
       markersRef.current = null;
       priceRef.current = null;
@@ -162,8 +193,18 @@ export function CandlestickChart({
     priceRef.current?.setData(candles);
     volumeRef.current?.setData(volumes);
     markersRef.current?.setMarkers(markers);
-    chartRef.current?.timeScale().fitContent();
+    applyRange(chartRef.current, visibleRange);
+    // visibleRange is applied by its own effect; here it only positions the
+    // initial view right after (re)loading data.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candles, volumes, markers]);
+
+  // View-window updates (presets / custom range). Panning past the window is
+  // always possible because the series holds the full history.
+  useEffect(() => {
+    if (candles.length > 0) applyRange(chartRef.current, visibleRange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleRange]);
 
   // Theme updates.
   useEffect(() => {
@@ -189,6 +230,18 @@ export function CandlestickChart({
   }, [palette]);
 
   return <div ref={containerRef} style={{ height }} />;
+}
+
+function applyRange(chart: IChartApi | null, range: VisibleRange | null): void {
+  if (!chart) return;
+  if (range) {
+    chart.timeScale().setVisibleRange({
+      from: toTime(range.from),
+      to: toTime(range.to),
+    });
+  } else {
+    chart.timeScale().fitContent();
+  }
 }
 
 function formatSplit(ratio: number): string {
