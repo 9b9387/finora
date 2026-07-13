@@ -164,6 +164,97 @@ def quality(
     )
 
 
+# -- backtests ---------------------------------------------------------------
+
+
+def _load_artifact_json(path: Path) -> dict | None:
+    import json
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _artifact_summary(run_dir: Path) -> schemas.BacktestSummary | None:
+    metrics = _load_artifact_json(run_dir / "metrics.json")
+    config = _load_artifact_json(run_dir / "config.json") or {}
+    if metrics is None:
+        return None
+    name, _, stamp = run_dir.name.rpartition("_")
+    try:
+        parsed = schemas.BacktestMetrics(**metrics)
+    except Exception:
+        return None
+    return schemas.BacktestSummary(
+        id=run_dir.name,
+        name=config.get("name") or name or run_dir.name,
+        stamp=stamp,
+        kind=config.get("kind"),
+        start=config.get("start"),
+        end=config.get("end"),
+        cost_bps=config.get("cost_bps"),
+        metrics=parsed,
+    )
+
+
+@router.get("/backtests", response_model=schemas.BacktestList)
+def list_backtests(settings: Settings = Depends(get_settings)) -> schemas.BacktestList:
+    backtests_dir = settings.ops.backtests_dir
+    if not backtests_dir.is_dir():
+        return schemas.BacktestList(runs=[])
+    runs = [
+        summary
+        for run_dir in backtests_dir.iterdir()
+        if run_dir.is_dir() and (summary := _artifact_summary(run_dir)) is not None
+    ]
+    # newest stamp first, then name for stable ordering
+    runs.sort(key=lambda r: (r.stamp, r.name), reverse=True)
+    return schemas.BacktestList(runs=runs)
+
+
+@router.get("/backtests/{run_id}", response_model=schemas.BacktestDetail)
+def backtest_detail(
+    run_id: str, settings: Settings = Depends(get_settings)
+) -> schemas.BacktestDetail:
+    backtests_dir = settings.ops.backtests_dir
+    run_dir = (backtests_dir / run_id).resolve()
+    if run_dir.parent != backtests_dir.resolve() or not run_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"unknown backtest {run_id!r}")
+    summary = _artifact_summary(run_dir)
+    if summary is None:
+        raise HTTPException(status_code=404, detail=f"backtest {run_id!r} has no readable metrics")
+
+    points: list[schemas.EquityPoint] = []
+    returns_path = run_dir / "returns.csv"
+    if returns_path.exists():
+        frame = pd.read_csv(returns_path)
+        if {"date", "return"}.issubset(frame.columns) and len(frame):
+            returns = pd.to_numeric(frame["return"], errors="coerce").fillna(0.0)
+            equity = (1.0 + returns).cumprod()
+            drawdown = equity / equity.cummax() - 1.0
+            points = [
+                schemas.EquityPoint(
+                    date=_iso(day),
+                    ret=round(float(r), 8),
+                    equity=round(float(e), 6),
+                    drawdown=round(float(dd), 6),
+                )
+                for day, r, e, dd in zip(frame["date"], returns, equity, drawdown)
+            ]
+
+    config = _load_artifact_json(run_dir / "config.json") or {}
+    trades = config.pop("trades", None)
+    return schemas.BacktestDetail(
+        id=run_dir.name,
+        name=summary.name,
+        metrics=summary.metrics,
+        config=config,
+        points=points,
+        trades=trades if isinstance(trades, list) else None,
+    )
+
+
 # -- universe ----------------------------------------------------------------
 
 

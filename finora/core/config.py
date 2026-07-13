@@ -143,6 +143,7 @@ class OpsConfig(StrictModel):
     log_dir: Path = Path("logs")
     state_dir: Path = Path("state")
     reports_dir: Path = Path("reports")
+    backtests_dir: Path = Path("artifacts/backtests")
     notifier: Literal["stdout", "telegram", "email"] = "stdout"
     telegram: TelegramConfig = TelegramConfig()
     email: EmailConfig = EmailConfig()

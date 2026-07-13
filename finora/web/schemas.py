@@ -95,3 +95,46 @@ class UniverseDiff(BaseModel):
     added: list[str]
     removed: list[str]
     unchanged_count: int
+
+
+class BacktestMetrics(BaseModel):
+    # floats are None when the artifact stored a non-finite value (e.g. the
+    # sharpe of a constant return series)
+    total_return: float | None
+    annualized_return: float | None
+    annualized_vol: float | None
+    sharpe: float | None
+    max_drawdown: float | None
+    calmar: float | None
+    n_days: int
+
+
+class BacktestSummary(BaseModel):
+    id: str  # artifact directory name, e.g. rsi_spy_20260709
+    name: str
+    stamp: str  # last return date, YYYYMMDD (from the directory name)
+    kind: str | None
+    start: str | None
+    end: str | None
+    cost_bps: float | None
+    metrics: BacktestMetrics
+
+
+class BacktestList(BaseModel):
+    runs: list[BacktestSummary]
+
+
+class EquityPoint(BaseModel):
+    date: str
+    ret: float
+    equity: float
+    drawdown: float
+
+
+class BacktestDetail(BaseModel):
+    id: str
+    name: str
+    metrics: BacktestMetrics
+    config: dict
+    points: list[EquityPoint]
+    trades: list[dict] | None = None

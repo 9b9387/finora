@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from finora.core.config import DataConfig, Settings
+from finora.core.config import DataConfig, OpsConfig, Settings
 from finora.web.app import create_app
 
 # Consecutive NYSE trading days (no long gaps).
@@ -49,7 +49,15 @@ def write_partition(
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(data=DataConfig(data_dir=tmp_path / "data"))
+    return Settings(
+        data=DataConfig(data_dir=tmp_path / "data"),
+        ops=OpsConfig(
+            log_dir=tmp_path / "logs",
+            state_dir=tmp_path / "state",
+            reports_dir=tmp_path / "reports",
+            backtests_dir=tmp_path / "artifacts" / "backtests",
+        ),
+    )
 
 
 @pytest.fixture
@@ -187,6 +195,75 @@ def test_universe_snapshots_and_detail(settings: Settings, client: TestClient) -
     detail = client.get("/api/universe/snapshots/2024-01-01").json()
     assert detail == {"date": "2024-01-01", "symbols": ["AAA", "BBB", "CCC"]}
     assert client.get("/api/universe/snapshots/2030-01-01").status_code == 404
+
+
+def make_artifact(
+    settings: Settings,
+    name: str,
+    daily_returns: list[float],
+    start: str = "2024-01-02",
+    trades: list[dict] | None = None,
+    kind: str = "rsi",
+) -> str:
+    from finora.backtest.report import compute_metrics, save_backtest_artifact
+
+    returns = pd.Series(
+        daily_returns,
+        index=pd.bdate_range(start, periods=len(daily_returns), name="date"),
+        name="return",
+    )
+    snapshot: dict = {"name": name, "kind": kind, "params": {}, "cost_bps": 15.0,
+                      "start": start, "end": None}
+    if trades is not None:
+        snapshot["trades"] = trades
+    out_dir = save_backtest_artifact(
+        name, compute_metrics(returns), snapshot, returns,
+        out_root=settings.ops.backtests_dir,
+    )
+    return out_dir.name
+
+
+def test_backtests_empty(client: TestClient) -> None:
+    assert client.get("/api/backtests").json() == {"runs": []}
+
+
+def test_backtests_list_sorted_with_metrics(
+    settings: Settings, client: TestClient
+) -> None:
+    make_artifact(settings, "older", [0.01, -0.02, 0.005], start="2023-06-01")
+    run_id = make_artifact(settings, "newer", [0.01, 0.01, 0.01], kind="qlib")
+    body = client.get("/api/backtests").json()
+    assert [r["name"] for r in body["runs"]] == ["newer", "older"]
+    newest = body["runs"][0]
+    assert newest["id"] == run_id
+    assert newest["kind"] == "qlib"
+    assert newest["cost_bps"] == 15.0
+    assert newest["metrics"]["n_days"] == 3
+    assert newest["metrics"]["total_return"] == pytest.approx(1.01**3 - 1)
+
+
+def test_backtest_detail_points_and_trades(
+    settings: Settings, client: TestClient
+) -> None:
+    trades = [{"date": "2024-01-03", "action": "buy", "rsi": 25.0}]
+    run_id = make_artifact(settings, "rsi_test", [0.10, -0.50], trades=trades)
+    body = client.get(f"/api/backtests/{run_id}").json()
+    assert body["name"] == "rsi_test"
+    assert [p["date"] for p in body["points"]] == ["2024-01-02", "2024-01-03"]
+    assert body["points"][0]["equity"] == pytest.approx(1.10)
+    assert body["points"][1]["equity"] == pytest.approx(0.55)
+    assert body["points"][1]["drawdown"] == pytest.approx(-0.5)
+    assert body["trades"] == trades
+    assert "trades" not in body["config"]  # popped into its own field
+    assert body["config"]["cost_bps"] == 15.0
+
+
+def test_backtest_detail_404_and_traversal(
+    settings: Settings, client: TestClient
+) -> None:
+    make_artifact(settings, "only", [0.01])
+    assert client.get("/api/backtests/nope_20240101").status_code == 404
+    assert client.get("/api/backtests/..%2F..%2Fetc").status_code == 404
 
 
 def test_universe_diff(settings: Settings, client: TestClient) -> None:
