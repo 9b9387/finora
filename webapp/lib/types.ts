@@ -92,3 +92,46 @@ export interface UniverseDiff {
   removed: string[];
   unchanged_count: number;
 }
+
+export interface BacktestMetrics {
+  total_return: number | null;
+  annualized_return: number | null;
+  annualized_vol: number | null;
+  sharpe: number | null;
+  max_drawdown: number | null;
+  calmar: number | null;
+  n_days: number;
+}
+
+export interface BacktestSummary {
+  id: string;
+  name: string;
+  stamp: string;
+  kind: string | null;
+  start: string | null;
+  end: string | null;
+  cost_bps: number | null;
+  metrics: BacktestMetrics;
+}
+
+export interface BacktestList {
+  runs: BacktestSummary[];
+}
+
+export interface EquityPoint {
+  date: string;
+  ret: number;
+  equity: number;
+  drawdown: number;
+}
+
+export type BacktestTrade = Record<string, unknown>;
+
+export interface BacktestDetail {
+  id: string;
+  name: string;
+  metrics: BacktestMetrics;
+  config: Record<string, unknown>;
+  points: EquityPoint[];
+  trades: BacktestTrade[] | null;
+}
