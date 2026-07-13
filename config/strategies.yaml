@@ -1,52 +1,59 @@
 # L2 strategies. stage: paper -> small -> full (quarantine ramp; promotions are
 # manual config edits, gated on forward performance).
+# This file is managed by the finora web UI; hand-written comments are not preserved.
 strategies:
-  - name: momentum_baseline
-    kind: momentum
-    stage: paper
-    capital_fraction: 1.0
-    params:
-      lookback_days: 126     # ~6 months
-      top_k: 20
-  - name: rsi_spy
-    kind: rsi
-    stage: paper
-    capital_fraction: 1.0
-    params:
-      symbol: SPY
-      period: 14            # daily Wilder RSI
-      buy_below: 30         # buy one unit on close below this
-      sell_above: 70        # sell one unit on close above this
-      rearm: 50             # trigger re-arms only after RSI returns here
-      unit_fraction: 0.25   # weight bought/sold per trigger
-      max_units: 4          # position cap (4 x 0.25 = fully invested)
-  - name: ma_cross_spy
-    kind: ma_cross
-    stage: paper
-    capital_fraction: 1.0
-    params:
-      symbol: SPY
-      fast_days: 50           # long while 50-day SMA > 200-day SMA (golden cross)
-      slow_days: 200
-      weight: 1.0             # fraction of equity held during a golden-cross regime
-  - name: boll_spy
-    kind: bollinger
-    stage: paper
-    capital_fraction: 1.0
-    params:
-      symbol: SPY
-      period: 20              # middle band = 20-day SMA
-      num_std: 2.0            # upper band = middle + 2 sigma
-      weight: 1.0             # buy close above upper band; exit close below middle
-  - name: qlib_lgb_alpha158
-    kind: qlib
-    stage: paper
-    capital_fraction: 1.0
-    params:
-      model_dir: artifacts/models/qlib_lgb_alpha158
-      top_k: 30
-      n_drop: 3
-      benchmark: SPY          # qlib backtest benchmark; must exist in the local store
-      train: ["2015-01-01", "2021-12-31"]
-      valid: ["2022-01-01", "2022-12-31"]
-      test: ["2023-01-01", "2024-12-31"]
+- name: momentum_baseline
+  kind: momentum
+  stage: paper
+  capital_fraction: 1.0
+  params:
+    lookback_days: 126
+    top_k: 20
+- name: rsi_spy
+  kind: rsi
+  stage: paper
+  capital_fraction: 1.0
+  params:
+    symbol: SPY
+    period: 14
+    buy_below: 30
+    sell_above: 70
+    rearm: 50
+    unit_fraction: 0.25
+    max_units: 4
+- name: ma_cross_spy
+  kind: ma_cross
+  stage: paper
+  capital_fraction: 1.0
+  params:
+    symbol: SPY
+    fast_days: 50
+    slow_days: 200
+    weight: 1.0
+- name: boll_spy
+  kind: bollinger
+  stage: paper
+  capital_fraction: 1.0
+  params:
+    symbol: SPY
+    period: 20
+    num_std: 2.0
+    weight: 1.0
+- name: qlib_lgb_alpha158
+  kind: qlib
+  stage: paper
+  capital_fraction: 1.0
+  params:
+    model_dir: artifacts/models/qlib_lgb_alpha158
+    top_k: 30
+    n_drop: 3
+    benchmark: SPY
+    train:
+    - '2015-01-01'
+    - '2021-12-31'
+    valid:
+    - '2022-01-01'
+    - '2022-12-31'
+    test:
+    - '2023-01-01'
+    - '2024-12-31'
