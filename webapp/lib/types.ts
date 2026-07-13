@@ -93,6 +93,24 @@ export interface UniverseDiff {
   unchanged_count: number;
 }
 
+export interface StrategyModel {
+  name: string;
+  kind: string;
+  stage: string;
+  capital_fraction: number;
+  params: Record<string, unknown>;
+}
+
+export interface StrategyListResponse {
+  strategies: StrategyModel[];
+}
+
+export interface RunBacktestResponse {
+  id: string;
+  name: string;
+  metrics: BacktestMetrics;
+}
+
 export interface BacktestMetrics {
   total_return: number | null;
   annualized_return: number | null;
