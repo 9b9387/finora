@@ -1,0 +1,170 @@
+{
+  "name": "boll_spy",
+  "kind": "bollinger",
+  "params": {
+    "symbol": "SPY",
+    "period": 20,
+    "num_std": 2.0,
+    "weight": 1.0
+  },
+  "cost_bps": 15.0,
+  "start": "2024-01-01",
+  "end": null,
+  "symbol": "SPY",
+  "trades": [
+    {
+      "date": "2024-01-19",
+      "action": "buy",
+      "close": 468.3029,
+      "upper_band": 465.7321,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2024-04-04",
+      "action": "sell",
+      "close": 499.593,
+      "middle_band": 503.013,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2024-05-09",
+      "action": "buy",
+      "close": 506.5065,
+      "upper_band": 506.1778,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2024-07-19",
+      "action": "sell",
+      "close": 536.2941,
+      "middle_band": 539.1735,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2024-09-19",
+      "action": "buy",
+      "close": 557.7755,
+      "upper_band": 556.2634,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2024-10-31",
+      "action": "sell",
+      "close": 557.1935,
+      "middle_band": 567.0407,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2024-11-06",
+      "action": "buy",
+      "close": 579.1426,
+      "upper_band": 576.1066,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2024-12-18",
+      "action": "sell",
+      "close": 574.4784,
+      "middle_band": 589.5767,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2025-01-21",
+      "action": "buy",
+      "close": 592.8996,
+      "upper_band": 592.1997,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2025-02-21",
+      "action": "sell",
+      "close": 589.842,
+      "middle_band": 595.2538,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2025-05-12",
+      "action": "buy",
+      "close": 574.9015,
+      "upper_band": 569.4315,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2025-08-01",
+      "action": "sell",
+      "close": 614.9066,
+      "middle_band": 621.5505,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2025-08-12",
+      "action": "buy",
+      "close": 635.6468,
+      "upper_band": 633.5384,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2025-08-21",
+      "action": "sell",
+      "close": 628.5851,
+      "middle_band": 629.3486,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2025-09-10",
+      "action": "buy",
+      "close": 645.0625,
+      "upper_band": 644.6033,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2025-10-10",
+      "action": "sell",
+      "close": 647.6542,
+      "middle_band": 658.896,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2025-10-24",
+      "action": "buy",
+      "close": 671.6852,
+      "upper_band": 670.8865,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2025-11-06",
+      "action": "sell",
+      "close": 664.8022,
+      "middle_band": 667.3109,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2025-12-24",
+      "action": "buy",
+      "close": 686.7305,
+      "upper_band": 685.6585,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2025-12-31",
+      "action": "sell",
+      "close": 678.3152,
+      "middle_band": 678.9391,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2026-04-09",
+      "action": "buy",
+      "close": 678.1628,
+      "upper_band": 676.9593,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2026-06-05",
+      "action": "sell",
+      "close": 735.6548,
+      "middle_band": 744.0776,
+      "weight_after": 0.0
+    }
+  ]
+}

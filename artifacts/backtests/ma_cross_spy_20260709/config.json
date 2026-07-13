@@ -1,0 +1,37 @@
+{
+  "name": "ma_cross_spy",
+  "kind": "ma_cross",
+  "params": {
+    "symbol": "SPY",
+    "fast_days": 50,
+    "slow_days": 200,
+    "weight": 1.0
+  },
+  "cost_bps": 15.0,
+  "start": "2024-01-01",
+  "end": null,
+  "symbol": "SPY",
+  "trades": [
+    {
+      "date": "2024-01-02",
+      "action": "buy",
+      "fast_ma": 435.6971,
+      "slow_ma": 419.031,
+      "weight_after": 1.0
+    },
+    {
+      "date": "2025-04-16",
+      "action": "sell",
+      "fast_ma": 561.5885,
+      "slow_ma": 562.5806,
+      "weight_after": 0.0
+    },
+    {
+      "date": "2025-06-27",
+      "action": "buy",
+      "fast_ma": 571.6021,
+      "slow_ma": 571.4609,
+      "weight_after": 1.0
+    }
+  ]
+}

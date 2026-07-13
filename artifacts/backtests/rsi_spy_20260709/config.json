@@ -16,42 +16,42 @@
   "symbol": "SPY",
   "trades": [
     {
-      "date": "2025-03-11T00:00:00",
+      "date": "2025-03-11",
       "action": "buy",
       "rsi": 28.37,
       "units_after": 1,
       "weight_after": 0.25
     },
     {
-      "date": "2025-04-04T00:00:00",
+      "date": "2025-04-04",
       "action": "buy",
       "rsi": 23.43,
       "units_after": 2,
       "weight_after": 0.5
     },
     {
-      "date": "2025-06-27T00:00:00",
+      "date": "2025-06-27",
       "action": "sell",
       "rsi": 70.17,
       "units_after": 1,
       "weight_after": 0.25
     },
     {
-      "date": "2025-09-15T00:00:00",
+      "date": "2025-09-15",
       "action": "sell",
       "rsi": 70.47,
       "units_after": 0,
       "weight_after": 0.0
     },
     {
-      "date": "2026-03-27T00:00:00",
+      "date": "2026-03-27",
       "action": "buy",
       "rsi": 28.53,
       "units_after": 1,
       "weight_after": 0.25
     },
     {
-      "date": "2026-04-16T00:00:00",
+      "date": "2026-04-16",
       "action": "sell",
       "rsi": 70.45,
       "units_after": 0,

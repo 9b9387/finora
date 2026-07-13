@@ -186,6 +186,8 @@ def _run_technical(
         return pd.Series(dtype=float, name="return"), {"symbol": strat.symbol, "trades": []}
 
     weights, trades = strat.window_weights(adj, in_window)
+    # artifact-friendly trade dates: plain YYYY-MM-DD instead of timestamps
+    trades = [{**t, "date": pd.Timestamp(t["date"]).date().isoformat()} for t in trades]
     daily_returns = adj[in_window].pct_change(fill_method=None).fillna(0.0)
     cost_rate = cost_bps / 1e4
     turnover = weights.diff().abs().fillna(weights.abs())
