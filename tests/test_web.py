@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from finora.core.config import DataConfig, OpsConfig, Settings
+from finora.core.config import Settings
 from finora.web.app import create_app
 
 # Consecutive NYSE trading days (no long gaps).
@@ -47,22 +47,40 @@ def write_partition(
     df.to_parquet(path, index=False)
 
 
+INITIAL_STRATEGIES_YAML = """strategies:
+  - name: rsi_spy
+    kind: rsi
+    stage: paper
+    capital_fraction: 1.0
+    params:
+      symbol: SPY
+"""
+
+
 @pytest.fixture
-def settings(tmp_path: Path) -> Settings:
-    return Settings(
-        data=DataConfig(data_dir=tmp_path / "data"),
-        ops=OpsConfig(
-            log_dir=tmp_path / "logs",
-            state_dir=tmp_path / "state",
-            reports_dir=tmp_path / "reports",
-            backtests_dir=tmp_path / "artifacts" / "backtests",
-        ),
+def config_dir(tmp_path: Path) -> Path:
+    """A real config dir so strategy CRUD round-trips through the yaml file."""
+    d = tmp_path / "config"
+    d.mkdir()
+    (d / "data.yaml").write_text(f"data_dir: {(tmp_path / 'data').as_posix()}\n")
+    (d / "ops.yaml").write_text(
+        f"log_dir: {(tmp_path / 'logs').as_posix()}\n"
+        f"state_dir: {(tmp_path / 'state').as_posix()}\n"
+        f"reports_dir: {(tmp_path / 'reports').as_posix()}\n"
+        f"backtests_dir: {(tmp_path / 'artifacts' / 'backtests').as_posix()}\n"
     )
+    (d / "strategies.yaml").write_text(INITIAL_STRATEGIES_YAML)
+    return d
 
 
 @pytest.fixture
-def client(settings: Settings) -> TestClient:
-    return TestClient(create_app(settings))
+def settings(config_dir: Path) -> Settings:
+    return Settings.load(config_dir)
+
+
+@pytest.fixture
+def client(settings: Settings, config_dir: Path) -> TestClient:
+    return TestClient(create_app(settings, config_dir=config_dir))
 
 
 def write_snapshot(settings: Settings, day: str, symbols: list[str]) -> None:
@@ -264,6 +282,136 @@ def test_backtest_detail_404_and_traversal(
     make_artifact(settings, "only", [0.01])
     assert client.get("/api/backtests/nope_20240101").status_code == 404
     assert client.get("/api/backtests/..%2F..%2Fetc").status_code == 404
+
+
+MA_PAYLOAD = {
+    "name": "ma_test",
+    "kind": "ma_cross",
+    "stage": "paper",
+    "capital_fraction": 1.0,
+    "params": {"symbol": "SPY", "fast_days": 3, "slow_days": 5, "weight": 1.0},
+}
+
+
+def test_strategies_list_initial(client: TestClient) -> None:
+    body = client.get("/api/strategies").json()
+    assert [s["name"] for s in body["strategies"]] == ["rsi_spy"]
+    assert body["strategies"][0]["kind"] == "rsi"
+
+
+def test_create_strategy_persists_to_yaml(
+    client: TestClient, config_dir: Path
+) -> None:
+    response = client.post("/api/strategies", json=MA_PAYLOAD)
+    assert response.status_code == 201, response.text
+    names = [s["name"] for s in client.get("/api/strategies").json()["strategies"]]
+    assert names == ["rsi_spy", "ma_test"]
+    assert "ma_test" in (config_dir / "strategies.yaml").read_text()
+
+
+def test_create_duplicate_name_conflicts(client: TestClient) -> None:
+    assert client.post("/api/strategies", json=MA_PAYLOAD).status_code == 201
+    assert client.post("/api/strategies", json=MA_PAYLOAD).status_code == 409
+
+
+def test_create_invalid_params_rejected(client: TestClient) -> None:
+    bad = {**MA_PAYLOAD, "params": {**MA_PAYLOAD["params"], "fast_days": 9}}
+    response = client.post("/api/strategies", json=bad)
+    assert response.status_code == 400
+    assert "fast_days" in response.json()["detail"]
+
+
+def test_create_unknown_kind_rejected(client: TestClient) -> None:
+    assert (
+        client.post("/api/strategies", json={**MA_PAYLOAD, "kind": "nope"}).status_code
+        == 422
+    )
+
+
+def test_update_strategy_params(client: TestClient, config_dir: Path) -> None:
+    payload = {
+        "kind": "rsi",
+        "stage": "small",
+        "capital_fraction": 0.5,
+        "params": {"symbol": "SPY", "period": 21},
+    }
+    response = client.put("/api/strategies/rsi_spy", json=payload)
+    assert response.status_code == 200, response.text
+    stored = client.get("/api/strategies").json()["strategies"][0]
+    assert stored["params"]["period"] == 21
+    assert stored["stage"] == "small"
+    assert stored["capital_fraction"] == 0.5
+    assert client.put("/api/strategies/ghost", json=payload).status_code == 404
+
+
+def test_update_with_invalid_params_leaves_file_unchanged(
+    client: TestClient, config_dir: Path
+) -> None:
+    before = (config_dir / "strategies.yaml").read_text()
+    payload = {"kind": "rsi", "params": {"buy_below": 80, "rearm": 50}}
+    assert client.put("/api/strategies/rsi_spy", json=payload).status_code == 400
+    assert (config_dir / "strategies.yaml").read_text() == before
+
+
+def test_delete_strategy(client: TestClient) -> None:
+    assert client.delete("/api/strategies/rsi_spy").status_code == 204
+    assert client.get("/api/strategies").json()["strategies"] == []
+    assert client.delete("/api/strategies/rsi_spy").status_code == 404
+
+
+def many_days(n: int) -> list[date]:
+    return [d.date() for d in pd.bdate_range("2024-01-02", periods=n)]
+
+
+def test_run_backtest_endpoint_creates_artifact(
+    settings: Settings, client: TestClient
+) -> None:
+    days = many_days(30)
+    closes = [100.0 - i for i in range(10)] + [90.0 + 2.0 * i for i in range(20)]
+    write_partition(settings.data.parquet_dir, "SPY", days, closes=closes)
+    assert client.post("/api/strategies", json=MA_PAYLOAD).status_code == 201
+
+    response = client.post(
+        "/api/backtests/run",
+        json={"name": "ma_test", "start": str(days[8]), "cost_bps": 10.0},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["name"] == "ma_test"
+    assert body["id"].startswith("ma_test_")
+    assert body["metrics"]["n_days"] > 10
+
+    detail = client.get(f"/api/backtests/{body['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["config"]["cost_bps"] == 10.0
+
+
+def test_run_backtest_symbol_override_uses_derived_name(
+    settings: Settings, client: TestClient
+) -> None:
+    days = many_days(30)
+    write_partition(settings.data.parquet_dir, "AAA", days,
+                    closes=[100.0 + i for i in range(30)])
+    assert client.post("/api/strategies", json=MA_PAYLOAD).status_code == 201
+
+    response = client.post(
+        "/api/backtests/run",
+        json={"name": "ma_test", "symbol": "aaa", "start": str(days[8])},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["id"].startswith("ma_test_AAA_")
+
+
+def test_run_backtest_unknown_strategy_404(client: TestClient) -> None:
+    assert (
+        client.post("/api/backtests/run", json={"name": "ghost"}).status_code == 404
+    )
+
+
+def test_run_backtest_no_data_maps_to_400(client: TestClient) -> None:
+    response = client.post("/api/backtests/run", json={"name": "rsi_spy"})
+    assert response.status_code == 400
+    assert "no price data" in response.json()["detail"]
 
 
 def test_universe_diff(settings: Settings, client: TestClient) -> None:

@@ -97,6 +97,26 @@ class UniverseDiff(BaseModel):
     unchanged_count: int
 
 
+class StrategyModel(BaseModel):
+    name: str
+    kind: str
+    stage: str
+    capital_fraction: float
+    params: dict
+
+
+class StrategyListResponse(BaseModel):
+    strategies: list[StrategyModel]
+
+
+class RunBacktestRequest(BaseModel):
+    name: str
+    symbol: str | None = None  # overrides params.symbol for technical kinds
+    start: str | None = None  # ISO dates
+    end: str | None = None
+    cost_bps: float = 15.0
+
+
 class BacktestMetrics(BaseModel):
     # floats are None when the artifact stored a non-finite value (e.g. the
     # sharpe of a constant return series)
@@ -138,3 +158,9 @@ class BacktestDetail(BaseModel):
     config: dict
     points: list[EquityPoint]
     trades: list[dict] | None = None
+
+
+class RunBacktestResponse(BaseModel):
+    id: str  # artifact directory name — /api/backtests/{id} serves the detail
+    name: str
+    metrics: BacktestMetrics

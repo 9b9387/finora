@@ -11,13 +11,15 @@ from typing import Iterator
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from finora.core.config import Settings
+from finora.core.config import Settings, StrategyConfig
+from finora.core.errors import FinoraError
 from finora.core.models import utc_now
 from finora.data.etl import last_completed_session
 from finora.data.events import detect_adjustment_events
 from finora.data.store import MarketStore, run_quality_checks
 from finora.data.universe import normalize_symbol
 from finora.web import schemas
+from finora.web.strategy_store import load_strategies, save_strategies
 
 router = APIRouter(prefix="/api")
 
@@ -162,6 +164,141 @@ def quality(
         ],
         generated_at=utc_now().isoformat(),
     )
+
+
+# -- strategy management -------------------------------------------------------
+
+TECHNICAL_KINDS = ("rsi", "ma_cross", "bollinger")
+
+
+def _config_dir(request: Request) -> Path:
+    return request.app.state.config_dir
+
+
+def _strategy_model(cfg: StrategyConfig) -> schemas.StrategyModel:
+    return schemas.StrategyModel(**cfg.model_dump(mode="json"))
+
+
+def _reload_settings(request: Request) -> None:
+    """Writes changed strategies.yaml; refresh the app-wide Settings."""
+    request.app.state.settings = Settings.load(request.app.state.config_dir)
+
+
+def _parse_strategy(payload: dict) -> StrategyConfig:
+    try:
+        return StrategyConfig(**payload)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/strategies", response_model=schemas.StrategyListResponse)
+def list_strategies(request: Request) -> schemas.StrategyListResponse:
+    strategies = load_strategies(_config_dir(request))
+    return schemas.StrategyListResponse(
+        strategies=[_strategy_model(cfg) for cfg in strategies]
+    )
+
+
+@router.post("/strategies", response_model=schemas.StrategyModel, status_code=201)
+def create_strategy(payload: dict, request: Request) -> schemas.StrategyModel:
+    cfg = _parse_strategy(payload)
+    config_dir = _config_dir(request)
+    strategies = load_strategies(config_dir)
+    if any(existing.name == cfg.name for existing in strategies):
+        raise HTTPException(status_code=409, detail=f"strategy {cfg.name!r} already exists")
+    try:
+        save_strategies(config_dir, [*strategies, cfg])
+    except FinoraError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _reload_settings(request)
+    return _strategy_model(cfg)
+
+
+@router.put("/strategies/{name}", response_model=schemas.StrategyModel)
+def update_strategy(name: str, payload: dict, request: Request) -> schemas.StrategyModel:
+    cfg = _parse_strategy({**payload, "name": name})  # the path names the strategy
+    config_dir = _config_dir(request)
+    strategies = load_strategies(config_dir)
+    if not any(existing.name == name for existing in strategies):
+        raise HTTPException(status_code=404, detail=f"unknown strategy {name!r}")
+    updated = [cfg if existing.name == name else existing for existing in strategies]
+    try:
+        save_strategies(config_dir, updated)
+    except FinoraError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _reload_settings(request)
+    return _strategy_model(cfg)
+
+
+@router.delete("/strategies/{name}", status_code=204)
+def delete_strategy(name: str, request: Request) -> None:
+    config_dir = _config_dir(request)
+    strategies = load_strategies(config_dir)
+    remaining = [cfg for cfg in strategies if cfg.name != name]
+    if len(remaining) == len(strategies):
+        raise HTTPException(status_code=404, detail=f"unknown strategy {name!r}")
+    save_strategies(config_dir, remaining)
+    _reload_settings(request)
+
+
+@router.post("/backtests/run", response_model=schemas.RunBacktestResponse)
+def run_backtest_endpoint(
+    payload: schemas.RunBacktestRequest, request: Request
+) -> schemas.RunBacktestResponse:
+    from finora.backtest.runner import run_backtest
+
+    settings: Settings = request.app.state.settings
+    cfg = next((s for s in settings.strategies if s.name == payload.name), None)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"unknown strategy {payload.name!r}")
+
+    if payload.symbol:
+        symbol = payload.symbol.strip().upper()
+        if cfg.kind not in TECHNICAL_KINDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"symbol override only applies to {', '.join(TECHNICAL_KINDS)} strategies",
+            )
+        if symbol != str(cfg.params.get("symbol", "")).upper():
+            # run under a derived name so the strategy's own artifact survives
+            cfg = cfg.model_copy(
+                update={
+                    "name": f"{cfg.name}_{symbol}",
+                    "params": {**cfg.params, "symbol": symbol},
+                }
+            )
+
+    def _parse_date(value: str | None, label: str) -> date | None:
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"invalid {label} date {value!r}") from exc
+
+    try:
+        metrics = run_backtest(
+            settings,
+            cfg,
+            start=_parse_date(payload.start, "start"),
+            end=_parse_date(payload.end, "end"),
+            cost_bps=payload.cost_bps,
+            out_root=settings.ops.backtests_dir,
+        )
+    except FinoraError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    artifact_dir = Path(str(metrics.pop("artifact_dir")))
+    return schemas.RunBacktestResponse(
+        id=artifact_dir.name,
+        name=cfg.name,
+        metrics=schemas.BacktestMetrics(**{k: _finite_or_none(v) for k, v in metrics.items()}),
+    )
+
+
+def _finite_or_none(value: object) -> object:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
 
 
 # -- backtests ---------------------------------------------------------------

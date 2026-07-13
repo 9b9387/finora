@@ -216,7 +216,7 @@ def serve(
             "finora.web.app:create_app", factory=True, host=host, port=port, reload=True
         )
     else:
-        uvicorn.run(create_app(settings), host=host, port=port)
+        uvicorn.run(create_app(settings, config_dir=config), host=host, port=port)
 
 
 @app.command()

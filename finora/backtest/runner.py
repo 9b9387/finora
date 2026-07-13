@@ -67,7 +67,7 @@ def run_backtest(
     }
     out_dir = save_backtest_artifact(cfg.name, metrics, snapshot, returns, out_root=out_root)
     log.info("backtest_done", strategy=cfg.name, out_dir=str(out_dir), **metrics)
-    return metrics
+    return {**metrics, "artifact_dir": str(out_dir)}
 
 
 def _run_momentum(
