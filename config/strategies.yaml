@@ -28,6 +28,7 @@ strategies:
       model_dir: artifacts/models/qlib_lgb_alpha158
       top_k: 30
       n_drop: 3
+      benchmark: SPY          # qlib backtest benchmark; must exist in the local store
       train: ["2015-01-01", "2021-12-31"]
       valid: ["2022-01-01", "2022-12-31"]
       test: ["2023-01-01", "2024-12-31"]

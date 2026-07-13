@@ -25,3 +25,6 @@ artifacts/models/
 
 # OS
 .DS_Store
+
+# qlib/mlflow writes a stray lock under a mangled absolute path when training
+/Users/
